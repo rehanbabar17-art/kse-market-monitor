@@ -1,0 +1,72 @@
+name: KSE Market Monitor
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run mode (interval, summary, or auto)"
+        required: false
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - interval
+          - summary
+      force:
+        description: "Skip market hours check"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r kse-monitor/requirements.txt
+
+      - name: Determine run mode
+        id: mode
+        run: |
+          echo "mode=${{ inputs.mode }}" >> $GITHUB_OUTPUT
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "force=--force" >> $GITHUB_OUTPUT
+          else
+            echo "force=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run KSE Monitor
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          cd kse-monitor
+          python main.py --mode ${{ steps.mode.outputs.mode }} ${{ steps.mode.outputs.force }}
+
+      - name: Commit EOD state (auto mode)
+        run: |
+          if [ -f kse-monitor/state/last_eod.txt ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add kse-monitor/state/last_eod.txt
+            if ! git diff --cached --quiet; then
+              git commit -m "Update EOD sent date [skip ci]"
+              git push
+              echo "EOD state committed"
+            else
+              echo "No EOD state change"
+            fi
+          else
+            echo "No EOD state file"
+          fi

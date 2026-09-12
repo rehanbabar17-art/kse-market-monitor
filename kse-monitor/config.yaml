@@ -1,0 +1,30 @@
+# ============================================================
+# KSE Monitor Configuration
+# ============================================================
+
+# ntfy notification settings
+# Set via NTFY_TOPIC environment variable (GitHub secret)
+ntfy:
+  server: "https://ntfy.sh"
+  topic: "${NTFY_TOPIC}"
+
+# Market hours (Pakistan Standard Time, UTC+5)
+market:
+  timezone: "Asia/Karachi"
+  open_hour: 9
+  close_hour: 17
+  interval_minutes: 30
+  weekdays_only: true
+
+# Your listed PSX stocks
+# Regular stocks use PSX ticker (e.g. MLCF, HTL)
+# Futures use SYMBOL-MONTH format (e.g. MLCF-SEP)
+stocks:
+  - symbol: "MLCF-SEP"
+    name: "Maple Leaf Cement Futures"
+  - symbol: "HTL"
+    name: "HTL"
+  - symbol: "YOUW"
+    name: "YOUW"
+  - symbol: "BIPL"
+    name: "BankIslami Pakistan"
