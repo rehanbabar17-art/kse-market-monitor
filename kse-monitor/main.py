@@ -115,7 +115,7 @@ def main():
     server = config["ntfy"]["server"]
     topic = config["ntfy"]["topic"]
 
-    if not topic or "\${" in topic:
+    if not topic or "${" in topic:
         print("ERROR: ntfy topic not set. Configure the NTFY_TOPIC secret / env var.")
         sys.exit(1)
 
