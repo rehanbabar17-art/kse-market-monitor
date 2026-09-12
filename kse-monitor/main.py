@@ -115,8 +115,8 @@ def main():
     server = config["ntfy"]["server"]
     topic = config["ntfy"]["topic"]
 
-    if not topic:
-        print("ERROR: ntfy topic not set in config.yaml")
+    if not topic or "\${" in topic:
+        print("ERROR: ntfy topic not set. Configure the NTFY_TOPIC secret / env var.")
         sys.exit(1)
 
     priority = 4 if args.mode == "summary" else 3
