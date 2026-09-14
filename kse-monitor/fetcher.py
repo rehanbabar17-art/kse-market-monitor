@@ -4,10 +4,7 @@ import requests
 
 
 def _parse_market_watch() -> dict:
-    """
-    Scrape the PSX DPS market-watch page for all listed stocks.
-    Returns a dict keyed by symbol.
-    """
+    """Scrape PSX DPS market-watch page for all listed stocks."""
     resp = requests.get(
         "https://dps.psx.com.pk/market-watch",
         timeout=30,
@@ -15,42 +12,31 @@ def _parse_market_watch() -> dict:
     )
     resp.raise_for_status()
     html = resp.text
-
     rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.DOTALL)
     stocks = {}
     for row in rows:
         cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
-        cleaned = [re.sub(r"<[^>]+>", "", c).strip() for c in cells]
-        if len(cleaned) < 11:
+        c = [re.sub(r"<[^>]+>", "", x).strip() for x in cells]
+        if len(c) < 11:
             continue
-        symbol, _sector, listed_in, ldcp, _open, high, low, current, change, change_pct, volume = cleaned[:11]
-        if not symbol or not current:
+        sym, _sec, listed, ldcp, opn, hi, lo, cur, chg, pct, vol = c[:11]
+        if not sym or not cur:
             continue
-        stocks[symbol] = {
-            "symbol": symbol,
-            "listed_in": listed_in,
-            "ldcp": _parse_num(ldcp),
-            "open": _parse_num(_open),
-            "high": _parse_num(high),
-            "low": _parse_num(low),
-            "price": _parse_num(current),
-            "change": _parse_num(change),
-            "change_pct": _parse_num(change_pct.replace("%", "")),
-            "volume": _parse_num(volume, as_int=True),
+        stocks[sym] = {
+            "symbol": sym, "listed_in": listed,
+            "ldcp": _num(ldcp), "open": _num(opn), "high": _num(hi),
+            "low": _num(lo), "price": _num(cur), "change": _num(chg),
+            "change_pct": _num(pct.replace("%", "")),
+            "volume": _num(vol, as_int=True),
         }
     return stocks
 
 
 def _parse_futures(month: str) -> dict:
-    """
-    Scrape PSX futures for a given month from the PSX website.
-    Returns a dict keyed by futures symbol (e.g. 'MLCF-SEP').
-    """
-    session = requests.Session()
-    session.get("https://www.psx.com.pk/", timeout=10,
-                headers={"User-Agent": "Mozilla/5.0"})
-
-    url = "https://www.psx.com.pk/psx/market-summary/future-contract-ajax"
+    """Scrape PSX futures for a given month."""
+    sess = requests.Session()
+    sess.get("https://www.psx.com.pk/", timeout=10,
+             headers={"User-Agent": "Mozilla/5.0"})
     headers = {
         "User-Agent": "Mozilla/5.0",
         "Referer": "https://www.psx.com.pk/psx/market-summary/future-contracts",
@@ -58,44 +44,36 @@ def _parse_futures(month: str) -> dict:
         "Origin": "https://www.psx.com.pk",
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     }
-
-    r = session.post(url, data={"month": month, "limit": 0},
-                     timeout=15, headers=headers)
+    r = sess.post(
+        "https://www.psx.com.pk/psx/market-summary/future-contract-ajax",
+        data={"month": month, "limit": 0}, timeout=15, headers=headers,
+    )
     r.raise_for_status()
-
     if "No Data found" in r.text:
         return {}
-
     rows = re.findall(r"<tr[^>]*>(.*?)</tr>", r.text, re.DOTALL)
     futures = {}
     for row in rows:
         cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
-        cleaned = [re.sub(r"<[^>]+>", "", c).strip() for c in cells]
-        if len(cleaned) < 7:
+        c = [re.sub(r"<[^>]+>", "", x).strip() for x in cells]
+        if len(c) < 7:
             continue
-        symbol, _open, high, low, current, change, volume = cleaned[:7]
-        if not symbol or not current:
+        sym, opn, hi, lo, cur, chg, vol = c[:7]
+        if not sym or not cur:
             continue
-        price_val = _parse_num(current)
-        change_val = _parse_num(change)
-        ldcp_val = (price_val - change_val) if price_val and change_val else None
-        pct = round((change_val / ldcp_val * 100), 2) if ldcp_val else 0
-        futures[symbol] = {
-            "symbol": symbol,
-            "listed_in": f"FUTURES-{month}",
-            "ldcp": ldcp_val,
-            "open": _parse_num(_open),
-            "high": _parse_num(high),
-            "low": _parse_num(low),
-            "price": price_val,
-            "change": change_val,
-            "change_pct": pct,
-            "volume": _parse_num(volume, as_int=True),
+        p, ch = _num(cur), _num(chg)
+        ldcp = (p - ch) if p and ch else None
+        pct = round(ch / ldcp * 100, 2) if ldcp else 0
+        futures[sym] = {
+            "symbol": sym, "listed_in": f"FUTURES-{month}", "ldcp": ldcp,
+            "open": _num(opn), "high": _num(hi), "low": _num(lo),
+            "price": p, "change": ch, "change_pct": pct,
+            "volume": _num(vol, as_int=True),
         }
     return futures
 
 
-def _parse_num(val: str, as_int: bool = False):
+def _num(val: str, as_int: bool = False):
     if not val:
         return None
     cleaned = val.replace(",", "").replace("%", "").strip()
@@ -105,194 +83,156 @@ def _parse_num(val: str, as_int: bool = False):
         return None
 
 
-def _fetch_investify_fallback(symbol: str) -> dict | None:
-    """
-    Fallback: fetch a single stock from investify.pk/company/SYMBOL/quote.
-    Extracts data from the embedded Next.js RSC payload.
-    Returns stock dict or None if not available.
-    """
-    url = f"https://www.investify.pk/company/{symbol}/quote"
+def fetch_psx_status() -> str:
+    """Scrape current market status from psx.com.pk ('Open'/'Closed')."""
     try:
-        resp = requests.get(url, timeout=15,
-                            headers={"User-Agent": "Mozilla/5.0"})
-        if resp.status_code != 200:
-            return None
-        text = resp.text
-
-        # The stock data lives in a __next_f.push block as escaped JSON
-        # Pattern: "stock":{"sym":"SYMBOL","c":price,"ch":change,...}
-        push_blocks = re.findall(
-            r'self\.__next_f\.push\(\[1,"(.*?)"\]\)', text, re.DOTALL
-        )
-
-        for block in push_blocks:
-            unescaped = block.replace('\\"', '"')
-            # Extract the stock object
-            m = re.search(r'"stock":\{[^}]*"sym":"' + re.escape(symbol) + r'"[^}]*\}', unescaped)
-            if not m:
-                continue
-
-            json_str = m.group(0).replace('"stock":', "", 1)
-            # Clean up any JS references (like ,f:f)
-            json_str = re.sub(r',\s*"[a-z]+":\s*[a-z](?=[,}])', "", json_str)
-            json_str = re.sub(r',\}', "}", json_str)
-
-            try:
-                data = json.loads(json_str)
-            except json.JSONDecodeError:
-                continue
-
-            price = data.get("c")
-            change = data.get("ch")
-            ldcp = data.get("ldcp")
-            if price is None:
-                continue
-
-            change_pct = round((change / ldcp * 100), 2) if ldcp and change is not None else 0
-
-            return {
-                "symbol": symbol,
-                "listed_in": "INVESTIFY_FALLBACK",
-                "ldcp": ldcp,
-                "open": data.get("o"),
-                "high": data.get("h"),
-                "low": data.get("l"),
-                "price": round(price, 2),
-                "change": round(change, 2) if change is not None else 0,
-                "change_pct": change_pct,
-                "volume": data.get("v"),
-            }
-
+        r = requests.get("https://www.psx.com.pk/", timeout=15,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        m = re.search(r"Market Status.*?<td[^>]*>\s*([^<]+)", r.text,
+                       re.DOTALL | re.IGNORECASE)
+        return m.group(1).strip() if m else "Unknown"
     except Exception:
-        pass
-    return None
+        return "Unknown"
 
 
 def fetch_kse100(all_stocks: dict = None) -> dict:
-    """Fetch KSE 100 index from PSX website."""
+    """Fetch KSE 100 index from PSX main page."""
     try:
-        resp = requests.get(
-            "https://www.psx.com.pk/",
-            timeout=20,
-            headers={"User-Agent": "Mozilla/5.0"},
-        )
-        resp.raise_for_status()
-        html = resp.text
+        r = requests.get("https://www.psx.com.pk/", timeout=20,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        html = r.text
 
-        def extract(field_id: str):
-            m = re.search(rf'id="{field_id}"[^>]*>([^<]+)<', html)
+        def ex(fid):
+            m = re.search(rf'id="{fid}"[^>]*>([^<]+)<', html)
             return m.group(1).strip() if m else None
 
-        price = _parse_num(extract("curIndex"))
-        change = _parse_num(extract("cahnge"))
-        change_pct = _parse_num(extract("percentchange"))
-        high = _parse_num(extract("high"))
-        low = _parse_num(extract("low"))
-        volume = _parse_num(extract("volume"), as_int=True)
+        p = _num(ex("curIndex"))
+        ch = _num(ex("cahnge"))
+        cp = _num(ex("percentchange"))
+        hi = _num(ex("high"))
+        lo = _num(ex("low"))
+        vol = _num(ex("volume"), as_int=True)
 
-        if price is not None:
+        if p is not None:
             return {
                 "symbol": "KSE100", "name": "KSE 100 Index",
-                "price": round(price, 2),
-                "change": round(change, 2),
-                "change_pct": round(change_pct, 2),
-                "volume": volume,
-                "high": round(high, 2) if high else None,
-                "low": round(low, 2) if low else None,
+                "price": round(p, 2), "change": round(ch, 2),
+                "change_pct": round(cp, 2), "volume": vol,
+                "high": round(hi, 2) if hi else None,
+                "low": round(lo, 2) if lo else None,
             }
     except Exception:
         pass
 
     if all_stocks is None:
         all_stocks = _parse_market_watch()
-
-    kse_stocks = [s for s in all_stocks.values()
-                  if "KSE100" in (s.get("listed_in") or "")]
-    if not kse_stocks:
+    kse = [s for s in all_stocks.values()
+           if "KSE100" in (s.get("listed_in") or "")]
+    if not kse:
         return {"symbol": "KSE100", "name": "KSE 100 Index",
                 "error": "Could not fetch KSE 100 data"}
-
-    total_ldcp = sum(s["ldcp"] or 0 for s in kse_stocks)
-    total_current = sum(s["price"] or 0 for s in kse_stocks)
-    total_high = sum(s["high"] or 0 for s in kse_stocks)
-    total_low = sum(s["low"] or 0 for s in kse_stocks)
-    total_vol = sum(s["volume"] or 0 for s in kse_stocks)
-    change = total_current - total_ldcp
-    change_pct = (change / total_ldcp * 100) if total_ldcp else 0
-
+    t_ldcp = sum(s["ldcp"] or 0 for s in kse)
+    t_cur = sum(s["price"] or 0 for s in kse)
+    t_hi = sum(s["high"] or 0 for s in kse)
+    t_lo = sum(s["low"] or 0 for s in kse)
+    t_vol = sum(s["volume"] or 0 for s in kse)
+    ch = t_cur - t_ldcp
+    cp = (ch / t_ldcp * 100) if t_ldcp else 0
     return {
         "symbol": "KSE100", "name": "KSE 100 Index",
-        "price": round(total_current, 2),
-        "change": round(change, 2),
-        "change_pct": round(change_pct, 2),
-        "volume": total_vol,
-        "high": round(total_high, 2),
-        "low": round(total_low, 2),
+        "price": round(t_cur, 2), "change": round(ch, 2),
+        "change_pct": round(cp, 2), "volume": t_vol,
+        "high": round(t_hi, 2), "low": round(t_lo, 2),
     }
 
 
-def _is_futures_symbol(symbol: str) -> bool:
-    """Check if a symbol looks like a futures contract (e.g. MLCF-SEP)."""
-    return bool(re.match(r"^[A-Z]+-[A-Z]{3}$", symbol.upper()))
+def _fetch_investify_fallback(symbol: str) -> dict | None:
+    """Fallback: fetch from investify.pk/company/SYMBOL/quote."""
+    url = f"https://www.investify.pk/company/{symbol}/quote"
+    try:
+        resp = requests.get(url, timeout=15,
+                            headers={"User-Agent": "Mozilla/5.0"})
+        if resp.status_code != 200:
+            return None
+        push_blocks = re.findall(
+            r'self\.__next_f\.push\(\[1,"(.*?)"\]\)', resp.text, re.DOTALL)
+        for block in push_blocks:
+            unescaped = block.replace('\\"', '"')
+            m = re.search(
+                r'"stock":\{[^}]*"sym":"' + re.escape(symbol) + r'"[^}]*\}',
+                unescaped)
+            if not m:
+                continue
+            j = m.group(0).replace('"stock":', "", 1)
+            j = re.sub(r',\s*"[a-z]+":\s*[a-z](?=[,}])', "", j)
+            j = re.sub(r',\}', "}", j)
+            try:
+                data = json.loads(j)
+            except json.JSONDecodeError:
+                continue
+            price = data.get("c")
+            change = data.get("ch")
+            ldcp = data.get("ldcp")
+            if price is None:
+                continue
+            return {
+                "symbol": symbol, "listed_in": "INVESTIFY_FALLBACK",
+                "ldcp": ldcp, "open": data.get("o"),
+                "high": data.get("h"), "low": data.get("l"),
+                "price": round(price, 2),
+                "change": round(change, 2) if change is not None else 0,
+                "change_pct": round(change / ldcp * 100, 2)
+                              if ldcp and change is not None else 0,
+                "volume": data.get("v"),
+            }
+    except Exception:
+        pass
+    return None
+
+
+def _is_futures(sym: str) -> bool:
+    return bool(re.match(r"^[A-Z]+-[A-Z]{3}$", sym.upper()))
 
 
 def fetch_all(stocks: list) -> dict:
-    """
-    Fetch KSE 100 + user stocks.
-    Strategy per stock:
-      1. If futures symbol (X-MON) -> PSX futures API
-      2. Else -> PSX DPS market-watch
-      3. Fallback -> investify.pk
-    """
+    """Fetch KSE 100 + user stocks with multi-source fallback."""
     futures_needed = {}
     for s in stocks:
         sym = s["symbol"].upper()
-        if _is_futures_symbol(sym):
-            month = sym.rsplit("-", 1)[1]
-            futures_needed.setdefault(month, []).append(sym)
+        if _is_futures(sym):
+            futures_needed.setdefault(sym.rsplit("-", 1)[1], []).append(sym)
 
     psx_all = _parse_market_watch()
-
     all_futures = {}
-    for month in futures_needed:
-        all_futures.update(_parse_futures(month))
+    for m in futures_needed:
+        all_futures.update(_parse_futures(m))
 
     stock_data = []
     for s in stocks:
         sym = s["symbol"].upper()
-
         if sym in all_futures:
-            d = all_futures[sym]
-            stock_data.append(_make_stock_entry(s, d))
-            continue
-
-        if sym in psx_all:
-            d = psx_all[sym]
-            stock_data.append(_make_stock_entry(s, d))
-            continue
-
-        fallback = _fetch_investify_fallback(sym)
-        if fallback:
-            stock_data.append(_make_stock_entry(s, fallback))
+            stock_data.append(_mk(s, all_futures[sym]))
+        elif sym in psx_all:
+            stock_data.append(_mk(s, psx_all[sym]))
         else:
-            stock_data.append({
-                "symbol": sym, "name": s["name"],
-                "error": f"Not found on PSX or Investify (tried: {sym})",
-            })
+            fb = _fetch_investify_fallback(sym)
+            if fb:
+                stock_data.append(_mk(s, fb))
+            else:
+                stock_data.append({
+                    "symbol": sym, "name": s["name"],
+                    "error": f"Not found on PSX or Investify (tried: {sym})",
+                })
 
     kse = fetch_kse100(all_stocks=psx_all)
     return {"kse100": kse, "stocks": stock_data}
 
 
-def _make_stock_entry(config: dict, data: dict) -> dict:
-    """Build a stock dict from config entry and scraped data."""
+def _mk(cfg: dict, data: dict) -> dict:
     return {
-        "symbol": config["symbol"],
-        "name": config["name"],
-        "price": data["price"],
-        "change": data["change"],
-        "change_pct": data["change_pct"],
-        "volume": data["volume"],
-        "high": data["high"],
-        "low": data["low"],
+        "symbol": cfg["symbol"], "name": cfg["name"],
+        "price": data["price"], "change": data["change"],
+        "change_pct": data["change_pct"], "volume": data["volume"],
+        "high": data["high"], "low": data["low"],
     }

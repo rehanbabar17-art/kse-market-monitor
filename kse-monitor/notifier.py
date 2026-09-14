@@ -3,7 +3,7 @@ import requests
 
 def send_ntfy(server: str, topic: str, title: str, message: str,
               priority: int = 3, tags: list = None) -> bool:
-    """Send a notification via ntfy.sh (or self-hosted ntfy server)."""
+    """Send a notification via ntfy.sh."""
     url = f"{server}/{topic}"
     headers = {
         "Title": title.encode("ascii", "replace").decode(),
@@ -21,34 +21,35 @@ def send_ntfy(server: str, topic: str, title: str, message: str,
 
 
 def format_interval_update(data: dict, timestamp: str) -> tuple[str, str]:
-    """Format interval update message. Returns (title, body)."""
-    lines = [f"📊 KSE Market Update — {timestamp}", ""]
+    """Interval update. Returns (title, body)."""
+    lines = [f"\U0001f4ca KSE Market Update \u2014 {timestamp}", ""]
 
-    # KSE 100
     kse = data["kse100"]
     if "error" in kse:
-        lines.append(f"⚠️ KSE 100: Error — {kse['error']}")
+        lines.append(f"\u26a0\ufe0f KSE 100: Error \u2014 {kse['error']}")
     else:
-        arrow = "🟢" if kse["change"] >= 0 else "🔴"
-        lines.append("📈 KSE 100 Index")
+        arrow = "\U0001f7e2" if kse["change"] >= 0 else "\U0001f534"
+        lines.append("\U0001f4c8 KSE 100 Index")
         lines.append(
             f"  {arrow} Price: {kse['price']:,.2f} | "
             f"Change: {kse['change']:+.2f} ({kse['change_pct']:+.2f}%)"
         )
         if kse["volume"]:
-            lines.append(f"  📊 Volume: {kse['volume']:,}")
+            lines.append(f"  \U0001f4ca Volume: {kse['volume']:,}")
         if kse["high"] and kse["low"]:
-            lines.append(f"  ⬆️ High: {kse['high']:,.2f} | ⬇️ Low: {kse['low']:,.2f}")
+            lines.append(
+                f"  \u2b06\ufe0f High: {kse['high']:,.2f} | "
+                f"\u2b07\ufe0f Low: {kse['low']:,.2f}"
+            )
         lines.append("")
 
-    # Stocks
     if data["stocks"]:
-        lines.append("📉 Your Stocks")
+        lines.append("\U0001f4c9 Your Stocks")
         for s in data["stocks"]:
             if "error" in s:
-                lines.append(f"  ⚠️ {s['name']} ({s['symbol']}): {s['error']}")
+                lines.append(f"  \u26a0\ufe0f {s['name']} ({s['symbol']}): {s['error']}")
             else:
-                arrow = "🟢" if s["change"] >= 0 else "🔴"
+                arrow = "\U0001f7e2" if s["change"] >= 0 else "\U0001f534"
                 sign = "+" if s["change"] >= 0 else ""
                 lines.append(
                     f"  {arrow} {s['name']} ({s['symbol']}): "
@@ -56,58 +57,67 @@ def format_interval_update(data: dict, timestamp: str) -> tuple[str, str]:
                 )
         lines.append("")
 
-    title = f"KSE Market Update — {timestamp}"
+    title = f"KSE Market Update \u2014 {timestamp}"
     return title, "\n".join(lines)
 
 
-def format_eod_summary(data: dict, timestamp: str) -> tuple[str, str]:
-    """Format end-of-day summary. Returns (title, body)."""
-    lines = [f"🏁 End of Day Summary — {timestamp}", ""]
+def format_eod_summary(data: dict, timestamp: str,
+                       label: str = "EOD") -> tuple[str, str]:
+    """End-of-session summary. Returns (title, body).
+    label: 'EOD' for final close, 'Midday' for Friday Jumma break.
+    """
+    emoji = "\U0001f3c1" if label == "EOD" else "\U0001f55b"
+    lines = [f"{emoji} {label} Summary \u2014 {timestamp}", ""]
 
-    # KSE 100
     kse = data["kse100"]
     if "error" in kse:
-        lines.append(f"⚠️ KSE 100: Error — {kse['error']}")
+        lines.append(f"\u26a0\ufe0f KSE 100: Error \u2014 {kse['error']}")
     else:
-        lines.append("📈 KSE 100 Index — Daily Summary")
-        lines.append(f"  📊 Close: {kse['price']:,.2f}")
+        lines.append(f"\U0001f4c8 KSE 100 Index \u2014 {label}")
+        lines.append(f"  \U0001f4ca Close: {kse['price']:,.2f}")
         lines.append(f"  Change: {kse['change']:+.2f} ({kse['change_pct']:+.2f}%)")
         if kse["volume"]:
-            lines.append(f"  📊 Volume: {kse['volume']:,}")
+            lines.append(f"  \U0001f4ca Volume: {kse['volume']:,}")
         if kse["high"] and kse["low"]:
-            lines.append(f"  ⬆️ Day High: {kse['high']:,.2f} | ⬇️ Day Low: {kse['low']:,.2f}")
+            lines.append(
+                f"  \u2b06\ufe0f Day High: {kse['high']:,.2f} | "
+                f"\u2b07\ufe0f Day Low: {kse['low']:,.2f}"
+            )
         lines.append("")
 
-    # Stocks
     if data["stocks"]:
-        lines.append("📉 Your Portfolio — Daily Summary")
+        lines.append(f"\U0001f4c9 Your Portfolio \u2014 {label}")
         lines.append("")
-        gainers = [s for s in data["stocks"] if "error" not in s and s["change"] > 0]
-        losers = [s for s in data["stocks"] if "error" not in s and s["change"] < 0]
+        gainers = [s for s in data["stocks"]
+                   if "error" not in s and s["change"] > 0]
+        losers = [s for s in data["stocks"]
+                  if "error" not in s and s["change"] < 0]
 
         for s in data["stocks"]:
             if "error" in s:
-                lines.append(f"  ⚠️ {s['name']} ({s['symbol']}): {s['error']}")
+                lines.append(
+                    f"  \u26a0\ufe0f {s['name']} ({s['symbol']}): {s['error']}"
+                )
             else:
-                arrow = "🟢" if s["change"] >= 0 else "🔴"
+                arrow = "\U0001f7e2" if s["change"] >= 0 else "\U0001f534"
                 sign = "+" if s["change"] >= 0 else ""
                 lines.append(
                     f"  {arrow} {s['name']} ({s['symbol']}): "
                     f"{s['price']:,.2f} | {sign}{s['change']:.2f} ({sign}{s['change_pct']:.2f}%)"
                 )
                 if s["high"] and s["low"]:
-                    vol_str = f" | 📊 Vol: {s['volume']:,}" if s["volume"] else ""
+                    vol = f" | \U0001f4ca Vol: {s['volume']:,}" if s["volume"] else ""
                     lines.append(
-                        f"    ⬆️ High: {s['high']:,.2f} | ⬇️ Low: {s['low']:,.2f}{vol_str}"
+                        f"    \u2b06\ufe0f High: {s['high']:,.2f} | "
+                        f"\u2b07\ufe0f Low: {s['low']:,.2f}{vol}"
                     )
-
         lines.append("")
         lines.append(
-            f"📊 Summary: {len(gainers)} gainers | {len(losers)} losers"
+            f"\U0001f4ca Summary: {len(gainers)} gainers | {len(losers)} losers"
         )
 
     lines.append("")
-    lines.append("🌅 Market closed. See you tomorrow! 📈")
+    lines.append("\U0001f305 See you next session! \U0001f4c8")
 
-    title = f"KSE Daily Summary — {timestamp}"
+    title = f"KSE {label} Summary \u2014 {timestamp}"
     return title, "\n".join(lines)

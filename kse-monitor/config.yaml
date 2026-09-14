@@ -2,23 +2,32 @@
 # KSE Monitor Configuration
 # ============================================================
 
-# ntfy notification settings
-# Set via NTFY_TOPIC environment variable (GitHub secret)
+# ntfy notification settings (set via NTFY_TOPIC GitHub secret)
 ntfy:
   server: "https://ntfy.sh"
   topic: "${NTFY_TOPIC}"
 
-# Market hours (Pakistan Standard Time, UTC+5)
+# Market timezone
 market:
   timezone: "Asia/Karachi"
-  open_hour: 9
-  close_hour: 17
-  interval_minutes: 30
-  weekdays_only: true
+
+# Trading windows — list of [open, close] pairs per weekday (PKT hours)
+# Monday–Thursday: one session
+# Friday: two sessions with a break for Jumma prayers
+trading_windows:
+  mon:
+    - [9, 17]
+  tue:
+    - [9, 17]
+  wed:
+    - [9, 17]
+  thu:
+    - [9, 17]
+  fri:
+    - [9, 13]     # morning session (until Jumma break)
+    - [14, 17]    # afternoon session (after Jumma break)
 
 # Your listed PSX stocks
-# Regular stocks use PSX ticker (e.g. MLCF, HTL)
-# Futures use SYMBOL-MONTH format (e.g. MLCF-SEP)
 stocks:
   - symbol: "MLCF-SEP"
     name: "Maple Leaf Cement Futures"
