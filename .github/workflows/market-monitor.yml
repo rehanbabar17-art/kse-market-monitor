@@ -56,10 +56,10 @@ jobs:
 
       - name: Commit EOD state (auto mode)
         run: |
-          if [ -f kse-monitor/state/last_eod.txt ]; then
+          if [ -f kse-monitor/state/last_eod.json ]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add kse-monitor/state/last_eod.txt
+            git add kse-monitor/state/last_eod.json
             if ! git diff --cached --quiet; then
               git commit -m "Update EOD sent date [skip ci]"
               git push

@@ -80,14 +80,25 @@ Accept: application/vnd.github+json
 > - **5:00 PM PKT onward (first check)** → EOD summary (then skips until next day)
 > - **Before 9 AM, weekends** → nothing
 
-### 4. Configure Stocks
+### 4. Configure Stocks & Trading Windows
 
-Stocks are in `kse-monitor/config.yaml`:
+Edit `kse-monitor/config.yaml`:
 
 ```yaml
-ntfy:
-  server: "https://ntfy.sh"
-  topic: "your-unique-topic"
+# Trading windows per day (PKT hours)
+# Friday has two sessions: before and after Jumma break
+trading_windows:
+  mon:
+    - [9, 17]
+  tue:
+    - [9, 17]
+  wed:
+    - [9, 17]
+  thu:
+    - [9, 17]
+  fri:
+    - [9, 13]     # morning (until Jumma)
+    - [14, 17]    # afternoon (after Jumma)
 
 stocks:
   - symbol: "MLCF-SEP"
@@ -96,8 +107,14 @@ stocks:
     name: "HTL"
 ```
 
+> **Auto mode behavior:**
+> - During a trading window → interval update
+> - At each window close → summary (once per window)
+> - During Friday Jumma break (13:00–14:00) → no updates, morning summary already sent
+> - Weekends / before market hours → nothing
+>
 > Find PSX symbols at [dps.psx.com.pk/market-watch](https://dps.psx.com.pk/market-watch).
-> Futures use `SYMBOL-MONTH` format (e.g. `MLCF-SEP`). Commit & push config changes — GitHub Actions picks them up automatically.
+> Futures use `SYMBOL-MONTH` format. Commit & push — GitHub Actions picks changes up automatically.
 
 ---
 
@@ -134,7 +151,7 @@ Expect an empty `204` response. Then check **Actions** tab on GitHub — the wor
 - **Add/remove stocks:** Edit `stocks` in `config.yaml`, then commit & push
 - **Change schedule:** Update the cron expressions on cron-job.org (NO repo change needed)
 - **Self-hosted ntfy:** Change `ntfy.server` in `config.yaml`
-- **Auto mode:** interval during hours, EOD once at close (state in `kse-monitor/state/last_eod.txt`)
+- **Auto mode:** interval during trading windows, summary at each window close (Friday has morning + afternoon sessions)
 
 ## Data Sources
 
