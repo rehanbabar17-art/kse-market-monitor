@@ -1,15 +1,30 @@
 import re
 import json
+import time
+
 import requests
+
+
+def _retry(fn, attempts: int = 3, backoff: float = 2.0, *args, **kwargs):
+    """Call fn(*args, **kwargs), retrying with exponential backoff."""
+    last_err = None
+    for i in range(attempts):
+        try:
+            return fn(*args, **kwargs)
+        except (requests.ConnectionError, requests.Timeout,
+                requests.exceptions.HTTPError) as e:
+            last_err = e
+            if i < attempts - 1:
+                time.sleep(backoff * (2 ** i))
+    raise last_err
 
 
 def _parse_market_watch() -> dict:
     """Scrape PSX DPS market-watch page for all listed stocks."""
-    resp = requests.get(
-        "https://dps.psx.com.pk/market-watch",
-        timeout=30,
-        headers={"User-Agent": "Mozilla/5.0"},
-    )
+    resp = _retry(requests.get,
+                 "https://dps.psx.com.pk/market-watch",
+                 timeout=30,
+                 headers={"User-Agent": "Mozilla/5.0"})
     resp.raise_for_status()
     html = resp.text
     rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.DOTALL)
@@ -44,10 +59,9 @@ def _parse_futures(month: str) -> dict:
         "Origin": "https://www.psx.com.pk",
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     }
-    r = sess.post(
-        "https://www.psx.com.pk/psx/market-summary/future-contract-ajax",
-        data={"month": month, "limit": 0}, timeout=15, headers=headers,
-    )
+    r = _retry(sess.post,
+               "https://www.psx.com.pk/psx/market-summary/future-contract-ajax",
+               data={"month": month, "limit": 0}, timeout=15, headers=headers)
     r.raise_for_status()
     if "No Data found" in r.text:
         return {}
@@ -86,8 +100,8 @@ def _num(val: str, as_int: bool = False):
 def fetch_psx_status() -> str:
     """Scrape current market status from psx.com.pk ('Open'/'Closed')."""
     try:
-        r = requests.get("https://www.psx.com.pk/", timeout=15,
-                         headers={"User-Agent": "Mozilla/5.0"})
+        r = _retry(requests.get, "https://www.psx.com.pk/", timeout=15,
+                   headers={"User-Agent": "Mozilla/5.0"})
         m = re.search(r"Market Status.*?<td[^>]*>\s*([^<]+)", r.text,
                        re.DOTALL | re.IGNORECASE)
         return m.group(1).strip() if m else "Unknown"
@@ -98,8 +112,8 @@ def fetch_psx_status() -> str:
 def fetch_kse100(all_stocks: dict = None) -> dict:
     """Fetch KSE 100 index from PSX main page."""
     try:
-        r = requests.get("https://www.psx.com.pk/", timeout=20,
-                         headers={"User-Agent": "Mozilla/5.0"})
+        r = _retry(requests.get, "https://www.psx.com.pk/", timeout=20,
+                   headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
         html = r.text
 
@@ -151,8 +165,8 @@ def _fetch_investify_fallback(symbol: str) -> dict | None:
     """Fallback: fetch from investify.pk/company/SYMBOL/quote."""
     url = f"https://www.investify.pk/company/{symbol}/quote"
     try:
-        resp = requests.get(url, timeout=15,
-                            headers={"User-Agent": "Mozilla/5.0"})
+        resp = _retry(requests.get, url, timeout=15,
+                      headers={"User-Agent": "Mozilla/5.0"})
         if resp.status_code != 200:
             return None
         push_blocks = re.findall(
