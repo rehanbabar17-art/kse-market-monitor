@@ -5,7 +5,7 @@ import time
 import requests
 
 
-def _retry(fn, attempts: int = 3, backoff: float = 2.0, *args, **kwargs):
+def _retry(fn, attempts: int = 3, backoff: float = 120, *args, **kwargs):
     """Call fn(*args, **kwargs), retrying with exponential backoff."""
     last_err = None
     for i in range(attempts):
