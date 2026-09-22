@@ -54,19 +54,19 @@ jobs:
           cd kse-monitor
           python main.py --mode ${{ steps.mode.outputs.mode }} ${{ steps.mode.outputs.force }}
 
-      - name: Commit EOD state (auto mode)
+      - name: Commit monitor state
         run: |
-          if [ -f kse-monitor/state/last_eod.json ]; then
+          if [ -d kse-monitor/state ]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add kse-monitor/state/last_eod.json
+            git add kse-monitor/state/*.json 2>/dev/null || true
             if ! git diff --cached --quiet; then
-              git commit -m "Update EOD sent date [skip ci]"
+              git commit -m "Update monitor state [skip ci]"
               git push
-              echo "EOD state committed"
+              echo "Monitor state committed"
             else
-              echo "No EOD state change"
+              echo "No state changes"
             fi
           else
-            echo "No EOD state file"
+            echo "No state directory"
           fi

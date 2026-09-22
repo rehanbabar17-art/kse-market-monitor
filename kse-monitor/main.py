@@ -60,6 +60,77 @@ def _save_state(state: dict):
         json.dump(state, f)
 
 
+def _last_check_path() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "state", "last_check.json")
+
+
+def _load_last_check() -> dict:
+    try:
+        with open(_last_check_path()) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_last_check(data: dict):
+    os.makedirs(os.path.dirname(_last_check_path()), exist_ok=True)
+    with open(_last_check_path(), "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def has_errors(data: dict) -> bool:
+    if not data or not isinstance(data, dict):
+        return True
+    kse = data.get("kse100")
+    if not kse or "error" in kse:
+        return True
+    stocks = data.get("stocks")
+    if stocks is None:
+        return True
+    for s in stocks:
+        if "error" in s:
+            return True
+    return False
+
+
+def extract_comparable_state(data: dict) -> dict | None:
+    if not data or has_errors(data):
+        return None
+    kse = data.get("kse100", {})
+    kse_state = {
+        "price": kse.get("price"),
+        "change": kse.get("change"),
+        "change_pct": kse.get("change_pct"),
+        "volume": kse.get("volume"),
+        "high": kse.get("high"),
+        "low": kse.get("low"),
+    }
+    stocks_state = []
+    for s in sorted(data.get("stocks", []), key=lambda x: x.get("symbol", "")):
+        stocks_state.append({
+            "symbol": s.get("symbol"),
+            "price": s.get("price"),
+            "change": s.get("change"),
+            "change_pct": s.get("change_pct"),
+            "volume": s.get("volume"),
+            "high": s.get("high"),
+            "low": s.get("low"),
+        })
+    return {
+        "kse100": kse_state,
+        "stocks": stocks_state,
+    }
+
+
+def is_duplicate_data(current_data: dict, last_data: dict) -> bool:
+    c_state = extract_comparable_state(current_data)
+    l_state = extract_comparable_state(last_data)
+    if c_state is None or l_state is None:
+        return False
+    return c_state == l_state
+
+
 def _sent_on(state: dict) -> set:
     return set(state.get("eod_sent", []))
 
@@ -144,11 +215,14 @@ def _decide_auto(config: dict) -> tuple[str, bool, str]:
 
 
 # ── market hours (non-auto) ───────────────────────────────────────
-def _is_market_hours(config: dict) -> bool:
+def is_market_hours(config: dict) -> bool:
     tz = pytz.timezone(config["market"]["timezone"])
     now = datetime.datetime.now(tz)
     win = _current_window(config, now.hour, now.weekday())
     return win is not None
+
+
+_is_market_hours = is_market_hours
 
 
 # ── main ───────────────────────────────────────────────────────────
@@ -179,6 +253,15 @@ def main():
     print(f"Fetching market data (mode={args.mode})...")
     data = fetch_all(stocks=config["stocks"])
 
+    if args.mode == "interval" and not args.force:
+        if has_errors(data):
+            print("Skipping update — fetch data contains errors")
+            sys.exit(0)
+        last_data = _load_last_check()
+        if is_duplicate_data(data, last_data):
+            print("Skipping update — duplicate market data (no price changes)")
+            sys.exit(0)
+
     tz = pytz.timezone(config["market"]["timezone"])
     now = datetime.datetime.now(tz)
     timestamp = now.strftime("%d %b %Y, %I:%M %p %Z")
@@ -201,6 +284,9 @@ def main():
     if not ok:
         print("Failed to send notification.")
         sys.exit(1)
+
+    if not has_errors(data):
+        _save_last_check(data)
 
     label = f"{summary_label} Summary" if args.mode == "summary" else "Update"
     print(f"{label} sent to ntfy://{topic}")

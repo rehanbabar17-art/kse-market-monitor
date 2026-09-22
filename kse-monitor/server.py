@@ -21,7 +21,8 @@ import pytz
 
 from fetcher import fetch_all
 from notifier import send_ntfy, format_interval_update, format_eod_summary
-from main import load_config, is_market_hours
+from main import (load_config, is_market_hours, has_errors,
+                  is_duplicate_data, _load_last_check, _save_last_check)
 
 
 app = Flask(__name__)
@@ -41,8 +42,18 @@ def _send(mode: str):
         return jsonify({"status": "unauthorized"}), 401
 
     config = CONFIG
+    force = request.args.get("force", "").lower() in ("true", "1")
     print("Fetching market data...")
     data = fetch_all(stocks=config["stocks"])
+
+    if mode == "interval" and not force:
+        if has_errors(data):
+            print("Data contains fetch errors. Skipping interval ntfy update.")
+            return jsonify({"status": "skipped", "reason": "fetch_error"})
+        last_data = _load_last_check()
+        if is_duplicate_data(data, last_data):
+            print("Duplicate market data detected. Skipping interval ntfy update.")
+            return jsonify({"status": "skipped", "reason": "duplicate_data"})
 
     tz = pytz.timezone(config["market"]["timezone"])
     now = datetime.datetime.now(tz)
@@ -63,6 +74,8 @@ def _send(mode: str):
     ok = send_ntfy(server, topic, title, body, priority=priority,
                    tags=["chart_with_upwards_trend"])
     if ok:
+        if not has_errors(data):
+            _save_last_check(data)
         return jsonify({"status": "ok", "mode": mode})
     return jsonify({"status": "error", "message": "ntfy send failed"}), 500
 
