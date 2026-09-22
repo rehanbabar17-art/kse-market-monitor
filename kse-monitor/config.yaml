@@ -37,3 +37,5 @@ stocks:
     name: "YOUW"
   - symbol: "BIPL"
     name: "BankIslami Pakistan"
+  - symbol: "PTC"
+    name: "Pakistan Telecommunication Company"
