@@ -39,3 +39,5 @@ stocks:
     name: "BankIslami Pakistan"
   - symbol: "PTC"
     name: "Pakistan Telecommunication Company"
+  - symbol: "HASCOL"
+    name: "Hascol Petroleum Limited"
