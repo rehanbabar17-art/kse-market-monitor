@@ -19,14 +19,8 @@ def _retry(fn, *args, attempts: int = 3, backoff: float = 120, **kwargs):
     raise last_err
 
 
-def _parse_market_watch() -> dict:
-    """Scrape PSX DPS market-watch page for all listed stocks."""
-    resp = _retry(requests.get,
-                 "https://dps.psx.com.pk/market-watch",
-                 timeout=30,
-                 headers={"User-Agent": "Mozilla/5.0"})
-    resp.raise_for_status()
-    html = resp.text
+def _parse_market_rows(html: str) -> dict:
+    """Parse the legacy PSX market-watch table HTML."""
     rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.DOTALL)
     stocks = {}
     for row in rows:
@@ -45,6 +39,25 @@ def _parse_market_watch() -> dict:
             "volume": _num(vol, as_int=True),
         }
     return stocks
+
+
+def _parse_market_watch() -> dict:
+    """Scrape PSX's legacy market-watch page when it is available.
+
+    The PSX Data Portal no longer serves /market-watch. Returning an empty
+    result lets fetch_all use the per-symbol Investify fallback instead of
+    aborting the entire notification run.
+    """
+    try:
+        resp = _retry(requests.get,
+                     "https://dps.psx.com.pk/market-watch",
+                     timeout=30,
+                     headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        return _parse_market_rows(resp.text)
+    except requests.RequestException as exc:
+        print(f"PSX market-watch unavailable ({exc}); using symbol fallbacks")
+        return {}
 
 
 def _parse_futures(month: str) -> dict:
@@ -117,6 +130,26 @@ def fetch_kse100(all_stocks: dict = None) -> dict:
         r.raise_for_status()
         html = r.text
 
+        # Current PSX homepage markup.
+        current = re.search(
+            r'topIndices__item__name">KSE100</div>.*?'
+            r'topIndices__item__val">([^<]+).*?'
+            r'topIndices__item__change">.*?</i>\s*([^<]+).*?'
+            r'topIndices__item__changep">\(([^)]+)%\)',
+            html, re.DOTALL)
+        if current:
+            p = _num(current.group(1))
+            ch = _num(current.group(2))
+            cp = _num(current.group(3))
+            if p is not None:
+                return {
+                    "symbol": "KSE100", "name": "KSE 100 Index",
+                    "price": round(p, 2), "change": round(ch, 2) if ch is not None else 0,
+                    "change_pct": round(cp, 2) if cp is not None else 0,
+                    "volume": None, "high": None, "low": None,
+                }
+
+        # Older PSX homepage markup, retained as a compatibility fallback.
         def ex(fid):
             m = re.search(rf'id="{fid}"[^>]*>([^<]+)<', html)
             return m.group(1).strip() if m else None
