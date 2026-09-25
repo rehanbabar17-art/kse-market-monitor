@@ -39,3 +39,5 @@ stocks:
     name: "BankIslami Pakistan"
   - symbol: "MLCF-OCT"
     name: "Maple Leaf Cement Futures"
+  - symbol: "HASCOL"
+    name: "Hascol Petroleum"
