@@ -29,9 +29,6 @@ trading_windows:
 
 # Your listed PSX stocks
 stocks:
-  - symbol: "MLCF-SEP"
-    name: "Maple Leaf Cement Futures"
-  - symbol: "HTL"
     name: "HTL"
   - symbol: "YOUW"
     name: "YOUW"
