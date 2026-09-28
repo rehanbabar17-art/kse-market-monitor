@@ -427,10 +427,7 @@ def fetch_kse100(all_stocks: dict = None) -> dict:
 
 def _fetch_investify_fallback(symbol: str) -> dict | None:
     """Fallback for a symbol if PSX futures or equity data is unavailable."""
-    url = (
-        f"https://www.investify.pk/"
-        f"company/{symbol}/quote"
-    )
+    url = f"https://www.investify.pk/company/{symbol}/quote"
 
     try:
         response = _retry(
@@ -450,39 +447,32 @@ def _fetch_investify_fallback(symbol: str) -> dict | None:
         )
 
         for block in push_blocks:
-            unescaped = block.replace('\\"', '"')
-
-            match = re.search(
-                r'"stock":\{[^}]*"sym":"'
-                + re.escape(symbol)
-                + r'"[^}]*\}',
-                unescaped,
-            )
-
-            if not match:
+            unescaped = block.replace('\"', '"')
+            idx = unescaped.find('"stock":{')
+            if idx == -1:
                 continue
 
-            data_json = match.group(0).replace(
-                '"stock":',
-                "",
-                1,
-            )
+            start = idx + len('"stock":')
+            brace_count = 0
+            end = -1
+            for i in range(start, len(unescaped)):
+                if unescaped[i] == '{':
+                    brace_count += 1
+                elif unescaped[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end = i + 1
+                        break
 
-            data_json = re.sub(
-                r',\s*"[a-z]+":\s*[a-z](?=[,}])',
-                "",
-                data_json,
-            )
-
-            data_json = re.sub(
-                r',\}',
-                "}",
-                data_json,
-            )
+            if end == -1:
+                continue
 
             try:
-                data = json.loads(data_json)
+                data = json.loads(unescaped[start:end])
             except json.JSONDecodeError:
+                continue
+
+            if data.get("sym", "").upper() != symbol.upper():
                 continue
 
             price = data.get("c")
@@ -507,8 +497,7 @@ def _fetch_investify_fallback(symbol: str) -> dict | None:
                 ),
                 "change_pct": (
                     round(change / ldcp * 100, 2)
-                    if ldcp
-                    and change is not None
+                    if ldcp and change is not None
                     else 0
                 ),
                 "volume": data.get("v"),
