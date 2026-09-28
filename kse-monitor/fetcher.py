@@ -65,7 +65,7 @@ def _parse_market_rows(html: str) -> dict:
 
     for row in rows:
         cells = re.findall(
-            r"<t([dh])([^>]*)>(.*?)</t>",
+            r"<t([dh])([^>]*)>(.*?)</t\1>",
             row,
             re.DOTALL | re.IGNORECASE,
         )
@@ -319,6 +319,34 @@ def fetch_kse100(all_stocks: dict = None) -> dict:
 
         response.raise_for_status()
 
+        # Current indices table: high, low, current, change, percent change.
+        row = re.search(
+            r'<tr[^>]*>.*?data-code="KSE100".*?</tr>',
+            response.text,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if row:
+            orders = re.findall(
+                r'<td[^>]*data-order="([^"]+)"',
+                row.group(0),
+                re.IGNORECASE,
+            )
+            if len(orders) >= 5:
+                price = _num(orders[2])
+                change = _num(orders[3])
+                change_pct = _num(orders[4])
+                if price is not None:
+                    return {
+                        "symbol": "KSE100",
+                        "name": "KSE 100 Index",
+                        "price": round(price, 2),
+                        "change": round(change, 2) if change is not None else 0,
+                        "change_pct": round(change_pct, 2) if change_pct is not None else 0,
+                        "volume": None,
+                        "high": _num(orders[0]),
+                        "low": _num(orders[1]),
+                    }
+
         text = re.sub(
             r"<[^>]+>",
             " | ",
@@ -439,6 +467,59 @@ def _fetch_investify_fallback(symbol: str) -> dict | None:
 
         if response.status_code != 200:
             return None
+
+        # Current Investify pages expose the quote in the page metadata and
+        # FAQ text; older pages also embedded a nested `stock` JSON object.
+        quote_match = re.search(
+            r"available PSX quote of PKR\s*([\d,]+(?:\.\d+)?)"
+            r".*?,\s*(up|down)\s+PKR\s*([\d,]+(?:\.\d+)?)"
+            r"\s*\(([+-]?[\d.]+)%\)",
+            response.text,
+            re.IGNORECASE | re.DOTALL,
+        )
+
+        if quote_match:
+            price = _num(quote_match.group(1))
+            direction = quote_match.group(2).lower()
+            abs_change = _num(quote_match.group(3)) or 0
+            change = -abs_change if direction == "down" else abs_change
+            change_pct = _num(quote_match.group(4)) or 0
+
+            range_match = re.search(
+                r"displayed session['’]s range is PKR\s*"
+                r"([\d,]+(?:\.\d+)?)\s+to\s+PKR\s*"
+                r"([\d,]+(?:\.\d+)?)",
+                response.text,
+                re.IGNORECASE,
+            )
+            volume_match = re.search(
+                r"reports\s+([\d,]+)\s+shares traded",
+                response.text,
+                re.IGNORECASE,
+            )
+
+            if price is not None:
+                return {
+                    "symbol": symbol,
+                    "listed_in": "INVESTIFY_FALLBACK",
+                    "ldcp": round(price - change, 2),
+                    "open": None,
+                    "high": (
+                        _num(range_match.group(2))
+                        if range_match else None
+                    ),
+                    "low": (
+                        _num(range_match.group(1))
+                        if range_match else None
+                    ),
+                    "price": round(price, 2),
+                    "change": round(change, 2),
+                    "change_pct": round(change_pct, 2),
+                    "volume": (
+                        _num(volume_match.group(1), as_int=True)
+                        if volume_match else None
+                    ),
+                }
 
         push_blocks = re.findall(
             r'self\.__next_f\.push\(\[1,"(.*?)"\]\)',
