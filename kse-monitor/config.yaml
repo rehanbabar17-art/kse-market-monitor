@@ -29,6 +29,7 @@ trading_windows:
 
 # Your listed PSX stocks
 stocks:
+  - symbol: "HTL"
     name: "HTL"
   - symbol: "YOUW"
     name: "YOUW"
