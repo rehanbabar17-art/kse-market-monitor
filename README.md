@@ -34,11 +34,11 @@ No always-on virtual machine or paid server is required. The architecture operat
                                                                      │
                          ┌───────────────────────────────────────────┴───────────────────────────────────────────┐
                          ▼                                                                                       ▼
-             ┌───────────────────────┐                                                               ┌───────────────────────┐
-             │   fetcher.py Scraper  │                                                               │  notifier.py Alert    │
-             │  • PSX Data Portal    │                                                               │  • Formats Message    │
-             │  • PSX Future Ajax    │                                                               │  • Posts to ntfy.sh   │
-             │  • Investify Fallback │                                                               └───────────┬───────────┘
+                         ┌───────────────────────┐                                                               ┌───────────────────────┐
+                         │   fetcher.py Scraper  │                                                               │  notifier.py Alert    │
+                         │  • PSX indices       │                                                               │  • Formats Message    │
+                         │  • PSX Futures AJAX   │                                                               │  • Posts to ntfy.sh   │
+                         │  • Investify fallback│                                                               └───────────┬───────────┘
              └───────────────────────┘                                                                           │
                                                                                                                  ▼
                                                                                                      ┌───────────────────────┐
@@ -125,16 +125,28 @@ git push origin main
 
 ## 🌐 How the Data Fetcher Works
 
-`kse-monitor/fetcher.py` employs a 3-tier resilient scraping strategy to ensure alerts are never blocked when official endpoints face downtime:
+`kse-monitor/fetcher.py` uses a resilient, per-symbol pipeline. A temporary failure in one source should not prevent notifications for the other symbols.
 
-1. **PSX Homepage (`psx.com.pk`) & Portal (`dps.psx.com.pk`)**:
-   - Fetches the benchmark **KSE 100 Index** values (current index, point change, % change).
-   - Scrapes the legacy market-watch table for regular equities.
-2. **PSX Futures AJAX Endpoint (`psx.com.pk/psx/market-summary/future-contract-ajax`)**:
-   - Queries contract tables dynamically for any `SYMBOL-MONTH` contract specified in your configuration.
-3. **Investify Fallback Engine (`investify.pk/company/{SYMBOL}/quote`)**:
-   - If `dps.psx.com.pk` is unreachable (e.g. returns 503, connection timeout, or Cloudflare challenge), the fetcher automatically falls back to Investify's real-time quote feeds on a per-symbol basis.
-   - **Fault-Tolerance**: If one specific symbol fails, it logs an error for that stock while continuing to fetch and send all other valid stocks in your list.
+### Quote-source order
+
+1. **KSE-100 index — PSX Data Portal and homepage**
+   - Reads the current index, point change, percentage change, and available high/low values from the current PSX indices table.
+   - Uses the PSX homepage markup as a compatibility fallback.
+2. **Regular equities — PSX market-watch, then Investify**
+   - Attempts the PSX market-watch snapshot first.
+   - The PSX route can return `403` or `404` to automated runners. In that case, each equity is fetched independently from `https://www.investify.pk/company/{SYMBOL}/quote`.
+   - Investify values are read from the current page quote metadata/FAQ payload, including current price, change, percentage change, volume, and day range.
+3. **Futures — PSX Futures AJAX**
+   - Queries `https://www.psx.com.pk/psx/market-summary/future-contract-ajax` for each configured contract month.
+   - Symbols must use `SYMBOL-MONTH`, for example `MLCF-OCT` or `OGDC-NOV`.
+
+### Expired futures
+
+Futures are month-specific contracts. Once a contract month expires, its quote may no longer be returned. For example, `MLCF-SEP` should be replaced with the active contract such as `MLCF-OCT`. An expired symbol is reported as unavailable while the other watch-list symbols continue normally.
+
+### Partial-failure behavior
+
+If one symbol cannot be found in either source, the notification still proceeds and marks only that symbol with an error. This is preferable to failing the entire GitHub Actions run.
 
 ---
 
@@ -259,7 +271,7 @@ export NTFY_TOPIC="your-test-topic"   # On Windows use: set NTFY_TOPIC=your-test
 python main.py --mode interval --force
 
 # Test End-of-Day (EOD) summary immediately
-python main.py --mode eod --force
+python main.py --mode summary --force
 
 # Run in normal auto mode (respects market schedule)
 python main.py --mode auto
@@ -277,9 +289,9 @@ If you want to customize how the application operates under the hood, here is a 
 
 ### 2. `kse-monitor/fetcher.py`
 - **`fetch_all(stocks: list)`**: Orchestrates the scraping pipeline.
-- **`fetch_kse100()`**: Parses the main KSE 100 Index value and day delta using regular expressions against the PSX website.
+- **`fetch_kse100()`**: Parses the KSE 100 Index table from the PSX Data Portal, with a homepage fallback.
 - **`_parse_futures(month: str)`**: Sends an AJAX POST request to retrieve future contracts.
-- **`_fetch_investify_fallback(symbol: str)`**: Next.js hydration parser for Investify quotes when PSX data portal is unavailable.
+- **`_fetch_investify_fallback(symbol: str)`**: Parses current Investify quote metadata and retains compatibility with older embedded JSON.
 
 ### 3. `kse-monitor/notifier.py`
 - **`build_interval_message(data)`**: Formats the text and visual emojis for live trading hours notifications.
@@ -295,7 +307,16 @@ If you want to customize how the application operates under the hood, here is a 
 ## ❓ Troubleshooting & FAQs
 
 #### Q: The notification says "Investify Fallback" or PSX is slow.
-**A**: The official PSX Data Portal (`dps.psx.com.pk`) frequently undergoes maintenance or rate-limiting. The scraper will automatically detect this and transparently pull quotes from Investify so you never miss an alert.
+**A**: The official PSX Data Portal (`dps.psx.com.pk`) can return `403`, `404`, or timeouts to automated runners. The scraper automatically pulls each regular equity from Investify instead. This is expected fallback behavior, not necessarily a failure.
+
+#### Q: A regular stock has no price in the notification.
+**A**: Check that the symbol is the official PSX ticker, then run a forced interval test from GitHub Actions. Inspect the `Run KSE Monitor` log for the symbol. If the symbol is a futures contract, confirm that its month has not expired and use the current `SYMBOL-MONTH` contract.
+
+#### Q: Why does an expired futures symbol show an error while other symbols work?
+**A**: Futures are separate month-specific instruments. Remove the expired entry or replace it with the currently traded month, for example change `MLCF-SEP` to `MLCF-OCT`.
+
+#### Q: The workflow succeeds but I still do not see a notification.
+**A**: Confirm that the ntfy app is subscribed to the exact topic stored in the GitHub Actions secret `NTFY_TOPIC`. In Actions, a successful `Run KSE Monitor` step means the fetch and ntfy publish request completed; a missing alert after that usually indicates a topic, subscription, or device-notification setting issue.
 
 #### Q: How do I test the GitHub Actions workflow manually?
 **A**: Go to your GitHub repo → **Actions** tab → Select **PSX Market Monitor** from the left sidebar → Click **Run workflow** dropdown → Select `mode: interval` and `force: true` → Click **Run workflow**.
