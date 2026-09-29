@@ -379,6 +379,62 @@ def fetch_psx_status() -> str:
         return "Unknown"
 
 
+def _parse_kse100_html(html: str) -> dict | None:
+    """Parse KSE-100 from current DPS table or homepage markup."""
+    row = re.search(
+        r'<tr[^>]*>.*?data-code="KSE100".*?</tr>',
+        html,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if row:
+        orders = re.findall(
+            r'<td[^>]*data-order="([^"]+)"',
+            row.group(0),
+            re.IGNORECASE,
+        )
+        if len(orders) >= 5:
+            price = _num(orders[2])
+            change = _num(orders[3])
+            change_pct = _num(orders[4])
+            if price is not None:
+                return {
+                    "symbol": "KSE100",
+                    "name": "KSE 100 Index",
+                    "price": round(price, 2),
+                    "change": round(change, 2) if change is not None else 0,
+                    "change_pct": round(change_pct, 2) if change_pct is not None else 0,
+                    "volume": None,
+                    "high": _num(orders[0]),
+                    "low": _num(orders[1]),
+                }
+
+    current = re.search(
+        r'topIndices__item__name">KSE100</div>.*?'
+        r'topIndices__item__val">([^<]+).*?'
+        r'topIndices__item__change">.*?</i>\s*([^<]+).*?'
+        r'topIndices__item__changep">\(([^)]+)%\)',
+        html,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if current:
+        price = _num(current.group(1))
+        change = _num(current.group(2))
+        change_pct = _num(current.group(3))
+        if price is not None:
+            return {
+                "symbol": "KSE100",
+                "name": "KSE 100 Index",
+                "price": round(price, 2),
+                "change": round(change, 2) if change is not None else 0,
+                "change_pct": round(change_pct, 2) if change_pct is not None else 0,
+                "volume": None,
+                "high": None,
+                "low": None,
+            }
+
+    return None
+
+
 def fetch_kse100(all_stocks: dict = None) -> dict:
     """Fetch KSE-100 from the PSX Data Portal."""
 
@@ -386,6 +442,21 @@ def fetch_kse100(all_stocks: dict = None) -> dict:
         "User-Agent": "Mozilla/5.0",
         "X-Requested-With": "XMLHttpRequest",
     }
+
+    # DPS may intermittently close one route to automated runners. Try both
+    # the dedicated indices page and the portal homepage before leaving DPS.
+    for url in (
+        "https://dps.psx.com.pk/indices",
+        "https://dps.psx.com.pk/",
+    ):
+        try:
+            response = _retry(requests.get, url, timeout=20, headers=headers)
+            response.raise_for_status()
+            parsed = _parse_kse100_html(response.text)
+            if parsed:
+                return parsed
+        except requests.RequestException as exc:
+            print(f"DPS KSE100 source unavailable ({url}: {exc})")
 
     # Current PSX Data Portal indices page.
     try:
