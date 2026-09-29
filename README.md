@@ -93,36 +93,29 @@ export KSE_STATE_FILE=/tmp/kse-monitor-last_eod.json
 B2_COMMAND=download python b2_sync.py
 ```
 
-Edit `/tmp/kse-monitor-config.yaml` and locate its `stocks:` section:
+Edit `/tmp/kse-monitor-config.yaml`. It contains only the symbols to track:
 
 ```yaml
 stocks:
-  - symbol: "MLCF-OCT"
-    name: "Maple Leaf Cement Futures"
-  - symbol: "HASCOL"
-    name: "Hascol Petroleum"
-  - symbol: "HUBC"
-    name: "Hub Power Company"
-  - symbol: "SYS"
-    name: "Systems Limited"
-  - symbol: "BIPL"
-    name: "BankIslami Pakistan"
+  - HTL
+  - YOUW
+  - BIPL
+  - MLCF-OCT
+  - HASCOL
 ```
 
 ### 2. Adding a Regular Stock
 Add a new item with the stock's standard PSX ticker symbol:
 ```yaml
-  - symbol: "OGDC"
-    name: "Oil & Gas Development Company"
+  - OGDC
 ```
 
 ### 3. Adding a Future Contract
 PSX 30-day and 90-day futures follow the `SYMBOL-MONTH` format (e.g. `MLCF-OCT`, `OGDC-NOV`, `TRG-DEC`):
 ```yaml
-  - symbol: "MLCF-OCT"
-    name: "Maple Leaf Cement October Futures"
+  - MLCF-OCT
 ```
-The scraper automatically detects the hyphenated month pattern, queries the PSX Futures AJAX table for that specific contract month, and parses its open, high, low, current price, and volume.
+The scraper automatically detects the hyphenated month pattern, queries the PSX Futures AJAX table for that specific contract month, and parses its open, high, low, current price, and volume. Display names are taken from fetched market data when supplied; otherwise the symbol is used.
 
 ### 4. Removing a Stock
 Delete or comment out (`#`) the symbol lines in `/tmp/kse-monitor-config.yaml`, then upload the updated B2 configuration:
@@ -184,24 +177,9 @@ Notifications are published via [ntfy.sh](https://ntfy.sh) — a free, open-sour
 
 Pakistan Stock Exchange trading sessions run in the **`Asia/Karachi`** timezone (PKT / UTC+5).
 
-The trading schedule is configured inside the B2 object `kse-market-monitor/config.yaml`:
-```yaml
-market:
-  timezone: "Asia/Karachi"
-
-trading_windows:
-  mon:
-    - [9, 17]      # 9:00 AM to 5:00 PM
-  tue:
-    - [9, 17]
-  wed:
-    - [9, 17]
-  thu:
-    - [9, 17]
-  fri:
-    - [9, 13]      # Morning session (9:00 AM - 1:00 PM)
-    - [14, 17]     # Afternoon session after Jumma break (2:00 PM - 5:00 PM)
-```
+The schedule is maintained in the monitor code, not in the B2 watchlist file. The monitor
+uses `Asia/Karachi`, Monday–Thursday 09:00–17:00 PKT, and Friday sessions 09:00–13:00
+and 14:00–17:00 PKT. The B2 file contains symbols only.
 
 ### Auto Mode Behavior:
 - **During a Trading Window**: Sends regular interval price alerts.
@@ -266,7 +244,7 @@ To allow `cron-job.org` to trigger your GitHub Actions workflow:
 
 ### B2 configuration and state lifecycle
 - Before the monitor starts, `b2_sync.py` downloads both B2 objects into `/tmp`.
-- The monitor reads the watchlist and trading schedule from the downloaded B2 configuration.
+- The monitor reads the symbols from the downloaded B2 configuration; names and quote details come from PSX/DPS market data when available.
 - After the monitor finishes, the workflow uploads both configuration and EOD state back to B2.
 - The temporary files are deleted after every run; no configuration or runtime-state cache is retained in GitHub.
 - If either required B2 object is missing, the workflow fails rather than silently using stale repository data.
@@ -338,8 +316,8 @@ rm -f "$B2_CONFIG_FILE" "$B2_STATE_FILE"
 If you want to customize how the application operates under the hood, here is a breakdown of what each Python module controls:
 
 ### 1. B2 object `kse-market-monitor/config.yaml`
-- Controls the stock watchlist, timezone, trading hours, and custom thresholds.
-- Values like `ntfy.server` can be altered if you host your own private ntfy server instance.
+- Contains only the symbols in the `stocks` list.
+- Company names, prices, and quote details are fetched from DPS/PSX sources when available.
 
 ### 2. `kse-monitor/fetcher.py`
 - **`fetch_all(stocks: list)`**: Orchestrates the scraping pipeline.
@@ -353,7 +331,7 @@ If you want to customize how the application operates under the hood, here is a 
 - **`send_ntfy(topic, message, title, priority, tags)`**: Dispatches the HTTP POST payload to `ntfy.sh`. You can adjust alert priorities (`high`, `default`, `low`) or customize sound tags (e.g. `chart_with_upwards_trend`, `moneybag`, `warning`).
 
 ### 4. `kse-monitor/main.py`
-- Evaluates the current market time against `trading_windows`.
+- Evaluates the current market time against the built-in PSX trading schedule.
 - Checks the B2-restored `last_eod.json` to guarantee only one EOD alert is dispatched per calendar day.
 
 ---
@@ -376,7 +354,7 @@ If you want to customize how the application operates under the hood, here is a 
 **A**: Go to your GitHub repo → **Actions** tab → Select **PSX Market Monitor** from the left sidebar → Click **Run workflow** dropdown → Select `mode: interval` and `force: true` → Click **Run workflow**.
 
 #### Q: Can I track stocks across different indices (e.g. KSE 30, KMI 30)?
-**A**: Yes. Download `kse-market-monitor/config.yaml` from B2, add the valid PSX ticker to its `stocks` list, and upload it again. Any stock listed on the Pakistan Stock Exchange can be tracked.
+**A**: Yes. Download `kse-market-monitor/config.yaml` from B2, add the valid PSX symbol to its `stocks` list, and upload it again. Any stock listed on the Pakistan Stock Exchange can be tracked.
 
 ---
 

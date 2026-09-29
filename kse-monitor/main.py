@@ -27,6 +27,14 @@ from notifier import send_ntfy, format_interval_update, format_eod_summary
 
 DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 DAY_INDEX = {k: i for i, k in enumerate(DAY_KEYS)}
+MARKET_TIMEZONE = "Asia/Karachi"
+TRADING_WINDOWS = {
+    "mon": [[9, 17]],
+    "tue": [[9, 17]],
+    "wed": [[9, 17]],
+    "thu": [[9, 17]],
+    "fri": [[9, 13], [14, 17]],
+}
 
 
 def load_config(path: str = None) -> dict:
@@ -37,7 +45,17 @@ def load_config(path: str = None) -> dict:
         raw = f.read()
     for k, v in os.environ.items():
         raw = raw.replace(f"${{{k}}}", v)
-    return yaml.safe_load(raw)
+    loaded = yaml.safe_load(raw) or {}
+    symbols = loaded.get("stocks", [])
+    if not symbols or not isinstance(symbols, list):
+        raise ValueError("B2 configuration must contain a non-empty stocks list")
+    normalized = []
+    for item in symbols:
+        symbol = item if isinstance(item, str) else item.get("symbol")
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ValueError("Every configured stock must be a symbol string")
+        normalized.append(symbol.strip().upper())
+    return {"stocks": normalized}
 
 
 # ── state helpers ──────────────────────────────────────────────────
@@ -106,7 +124,7 @@ def _decide_auto(config: dict) -> tuple[str, bool, str]:
     Returns (mode, persist_eod, window_id)
     Raises StopIteration to signal "skip, nothing to do".
     """
-    tz = pytz.timezone(config["market"]["timezone"])
+    tz = pytz.timezone(MARKET_TIMEZONE)
     now = datetime.datetime.now(tz)
     date_str = now.strftime("%Y-%m-%d")
     weekday = now.weekday()
@@ -115,7 +133,7 @@ def _decide_auto(config: dict) -> tuple[str, bool, str]:
     if weekday >= 5:
         raise StopIteration("weekend")
 
-    windows = _windows_for_day(config, weekday)
+    windows = _windows_for_day({"trading_windows": TRADING_WINDOWS}, weekday)
     if not windows:
         raise StopIteration(f"no trading windows defined for {DAY_KEYS[weekday]}")
 
@@ -147,7 +165,7 @@ def _decide_auto(config: dict) -> tuple[str, bool, str]:
 
 # ── market hours (non-auto) ───────────────────────────────────────
 def _is_market_hours(config: dict) -> bool:
-    tz = pytz.timezone(config["market"]["timezone"])
+    tz = pytz.timezone(MARKET_TIMEZONE)
     now = datetime.datetime.now(tz)
     win = _current_window(config, now.hour, now.weekday())
     return win is not None
@@ -181,7 +199,7 @@ def main():
     print(f"Fetching market data (mode={args.mode})...")
     data = fetch_all(stocks=config["stocks"])
 
-    tz = pytz.timezone(config["market"]["timezone"])
+    tz = pytz.timezone(MARKET_TIMEZONE)
     now = datetime.datetime.now(tz)
     timestamp = now.strftime("%d %b %Y, %I:%M %p %Z")
 
@@ -190,8 +208,8 @@ def main():
     else:
         title, body = format_interval_update(data, timestamp)
 
-    server = config["ntfy"]["server"]
-    topic = config["ntfy"]["topic"]
+    server = "https://ntfy.sh"
+    topic = os.environ.get("NTFY_TOPIC", "")
 
     if not topic or "${" in topic:
         print("ERROR: NTFY_TOPIC not configured. Add the GitHub secret.")

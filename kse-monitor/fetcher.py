@@ -755,7 +755,7 @@ def fetch_all(stocks: list) -> dict:
     futures_needed = {}
 
     for stock in stocks:
-        symbol = stock["symbol"].upper()
+        symbol = stock.upper() if isinstance(stock, str) else stock["symbol"].upper()
 
         if _is_futures(symbol):
             month = symbol.rsplit("-", 1)[1]
@@ -787,7 +787,7 @@ def fetch_all(stocks: list) -> dict:
     stock_data = []
 
     for stock in stocks:
-        symbol = stock["symbol"].upper()
+        symbol = stock.upper() if isinstance(stock, str) else stock["symbol"].upper()
 
         # Futures.
         if symbol in all_futures:
@@ -823,7 +823,7 @@ def fetch_all(stocks: list) -> dict:
             stock_data.append(
                 {
                     "symbol": symbol,
-                    "name": stock["name"],
+                    "name": symbol,
                     "error": (
                         "Symbol not found in DPS market-watch, PSX "
                         f"market summary, or Investify: {symbol}"
@@ -841,10 +841,11 @@ def fetch_all(stocks: list) -> dict:
     }
 
 
-def _mk(cfg: dict, data: dict) -> dict:
+def _mk(cfg: dict | str, data: dict) -> dict:
+    symbol = cfg if isinstance(cfg, str) else cfg["symbol"]
     return {
-        "symbol": cfg["symbol"],
-        "name": cfg["name"],
+        "symbol": symbol,
+        "name": data.get("name") or data.get("company") or symbol,
         "price": data["price"],
         # PSX reports blank change values for symbols with no trade/change.
         # Normalize them before notifier.py compares the value numerically.

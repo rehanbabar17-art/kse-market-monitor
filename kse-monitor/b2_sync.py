@@ -44,6 +44,8 @@ def validate_config(data: bytes) -> None:
     parsed = yaml.safe_load(data)
     if not isinstance(parsed, dict) or not isinstance(parsed.get("stocks"), list) or not parsed["stocks"]:
         raise RuntimeError("config.yaml must contain a non-empty stocks list")
+    if any(not isinstance(symbol, str) or not symbol.strip() for symbol in parsed["stocks"]):
+        raise RuntimeError("config.yaml stocks must contain symbols only")
 
 
 def validate_state(data: bytes) -> None:
