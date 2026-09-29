@@ -132,9 +132,10 @@ git push origin main
 1. **KSE-100 index — PSX Data Portal and homepage**
    - Reads the current index, point change, percentage change, and available high/low values from the current PSX indices table.
    - Uses the PSX homepage markup as a compatibility fallback.
-2. **Regular equities — PSX market-watch, then Investify**
-   - Attempts the PSX market-watch snapshot first.
-   - The PSX route can return `403` or `404` to automated runners. In that case, each equity is fetched independently from `https://www.investify.pk/company/{SYMBOL}/quote`.
+2. **Regular equities — DPS, official PSX market summary, then Investify**
+   - Attempts the DPS market-watch snapshot first.
+   - If DPS changes its route or returns `403`/`404`, the fetcher reads the official PSX market-summary include at `www.psx.com.pk/psx/include71650/new-PSX-market-summary.php` and its full-page fallback.
+   - If both official sources are unavailable or omit a symbol, each equity is fetched independently from `https://www.investify.pk/company/{SYMBOL}/quote`.
    - Investify values are read from the current page quote metadata/FAQ payload, including current price, change, percentage change, volume, and day range.
 3. **Futures — PSX Futures AJAX**
    - Queries `https://www.psx.com.pk/psx/market-summary/future-contract-ajax` for each configured contract month.
@@ -307,7 +308,7 @@ If you want to customize how the application operates under the hood, here is a 
 ## ❓ Troubleshooting & FAQs
 
 #### Q: The notification says "Investify Fallback" or PSX is slow.
-**A**: The official PSX Data Portal (`dps.psx.com.pk`) can return `403`, `404`, or timeouts to automated runners. The scraper automatically pulls each regular equity from Investify instead. This is expected fallback behavior, not necessarily a failure.
+**A**: The official DPS portal (`dps.psx.com.pk`) can return `403`, `404`, or timeouts to automated runners. The scraper first tries the official PSX market-summary page, then Investify per symbol. This is expected fallback behavior, not necessarily a failure.
 
 #### Q: A regular stock has no price in the notification.
 **A**: Check that the symbol is the official PSX ticker, then run a forced interval test from GitHub Actions. Inspect the `Run KSE Monitor` log for the symbol. If the symbol is a futures contract, confirm that its month has not expired and use the current `SYMBOL-MONTH` contract.

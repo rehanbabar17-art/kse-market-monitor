@@ -171,6 +171,85 @@ def _parse_market_watch() -> dict:
         return {}
 
 
+def _parse_psx_market_summary_rows(html: str) -> dict:
+    """Parse regular-equity rows from PSX's official market-summary include."""
+    stocks = {}
+    rows = re.finditer(
+        r'<tr\b[^>]*>(?:(?!<tr\b).)*?data-srip="([^"]+)"'
+        r'(?:(?!</tr>).)*?</tr>',
+        html,
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    for match in rows:
+        symbol = match.group(1)
+        row = match.group(0)
+        cells = re.findall(
+            r'<td[^>]*>(.*?)</td>',
+            row,
+            re.DOTALL | re.IGNORECASE,
+        )
+        values = [re.sub(r'<[^>]+>', '', cell).strip() for cell in cells]
+        if len(values) < 9:
+            continue
+
+        # A blank cell precedes SCRIP: blank, SCRIP, LDCP, OPEN, HIGH,
+        # LOW, CURRENT, CHANGE, VOLUME.
+        ldcp, opn, high, low, current, change, volume = values[2:9]
+        price = _num(current)
+        if price is None:
+            continue
+
+        change_value = _num(change)
+        ldcp_value = _num(ldcp)
+
+        stocks[symbol.upper()] = {
+            "symbol": symbol.upper(),
+            "listed_in": "PSX_MARKET_SUMMARY",
+            "ldcp": ldcp_value,
+            "open": _num(opn),
+            "high": _num(high),
+            "low": _num(low),
+            "price": price,
+            "change": change_value,
+            "change_pct": (
+                round(change_value / ldcp_value * 100, 2)
+                if change_value is not None and ldcp_value
+                else 0
+            ),
+            "volume": _num(volume, as_int=True),
+        }
+
+    return stocks
+
+
+def _parse_psx_market_summary() -> dict:
+    """Fetch regular-equity quotes from the official PSX market summary."""
+    urls = [
+        "https://www.psx.com.pk/psx/include71650/new-PSX-market-summary.php",
+        "https://www.psx.com.pk/psx/market-summary",
+    ]
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "text/html,application/xhtml+xml",
+        "Referer": "https://www.psx.com.pk/psx/market-summary",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    for url in urls:
+        try:
+            response = _retry(requests.get, url, timeout=30, headers=headers)
+            response.raise_for_status()
+            stocks = _parse_psx_market_summary_rows(response.text)
+            if stocks:
+                print(f"PSX market summary returned {len(stocks)} symbols from {url}")
+                return stocks
+        except requests.RequestException as exc:
+            print(f"PSX market summary unavailable ({url}: {exc})")
+
+    return {}
+
+
 def _parse_futures(month: str) -> dict:
     """Scrape PSX futures for a given month."""
     session = requests.Session()
@@ -614,7 +693,12 @@ def fetch_all(stocks: list) -> dict:
                 [],
             ).append(symbol)
 
+    # Try both official sources. DPS is preferred when available; PSX's
+    # market-summary include fills gaps when DPS changes route or blocks bots.
     psx_all = _parse_market_watch()
+    official_psx = _parse_psx_market_summary()
+    for symbol, quote in official_psx.items():
+        psx_all.setdefault(symbol, quote)
 
     all_futures = {}
 
@@ -670,8 +754,8 @@ def fetch_all(stocks: list) -> dict:
                     "symbol": symbol,
                     "name": stock["name"],
                     "error": (
-                        "Symbol not found in PSX "
-                        f"market-watch: {symbol}"
+                        "Symbol not found in DPS market-watch, PSX "
+                        f"market summary, or Investify: {symbol}"
                     ),
                 }
             )
