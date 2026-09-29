@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Restore and persist KSE monitor state in a private Backblaze B2 prefix."""
+"""Synchronize KSE monitor configuration and runtime state with Backblaze B2."""
 
 from __future__ import annotations
 
@@ -12,8 +12,10 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 ROOT = Path(__file__).resolve().parent
-STATE_FILE = ROOT / "state" / "last_eod.json"
-B2_KEY = "kse-market-monitor/last_eod.json"
+CONFIG_FILE = Path(os.environ.get("B2_CONFIG_FILE", str(ROOT / "config.yaml")))
+STATE_FILE = Path(os.environ.get("B2_STATE_FILE", str(ROOT / "state" / "last_eod.json")))
+CONFIG_KEY = "kse-market-monitor/config.yaml"
+STATE_KEY = "kse-market-monitor/last_eod.json"
 
 
 def b2_client():
@@ -37,48 +39,61 @@ def missing_object(error: ClientError) -> bool:
     return code in {"404", "NoSuchKey", "NotFound"}
 
 
+def validate_config(data: bytes) -> None:
+    import yaml
+    parsed = yaml.safe_load(data)
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("stocks"), list) or not parsed["stocks"]:
+        raise RuntimeError("config.yaml must contain a non-empty stocks list")
+
+
 def validate_state(data: bytes) -> None:
     parsed = json.loads(data)
     if not isinstance(parsed, dict) or not isinstance(parsed.get("eod_sent", []), list):
         raise RuntimeError("last_eod.json must be an object containing an eod_sent array")
 
 
+def get_object(s3, key: str) -> bytes:
+    return s3.get_object(Bucket=os.environ["B2_BUCKET"], Key=key)["Body"].read()
+
+
 def download() -> None:
     s3 = b2_client()
-    bucket = os.environ["B2_BUCKET"]
     try:
-        data = s3.get_object(Bucket=bucket, Key=B2_KEY)["Body"].read()
+        config_data = get_object(s3, CONFIG_KEY)
     except ClientError as error:
         if missing_object(error):
-            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            if STATE_FILE.exists():
-                validate_state(STATE_FILE.read_bytes())
-                print("[B2] No KSE state exists yet; retaining the repository state for one-time bootstrap.")
-            else:
-                STATE_FILE.write_text('{"eod_sent": []}\n', encoding="utf-8")
-                print("[B2] No KSE state exists; created an empty state for bootstrap.")
-            return
+            raise RuntimeError(f"Required B2 configuration object is missing: {CONFIG_KEY}") from error
         raise
-    validate_state(data)
+    validate_config(config_data)
+    try:
+        state_data = get_object(s3, STATE_KEY)
+    except ClientError as error:
+        if not missing_object(error):
+            raise
+        state_data = b'{"eod_sent": []}\n'
+        print(f"[B2] State object missing; initializing {STATE_KEY}.")
+    validate_state(state_data)
+    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_bytes(data)
-    print(f"[B2] Restored KSE state from {B2_KEY}.")
+    CONFIG_FILE.write_bytes(config_data)
+    STATE_FILE.write_bytes(state_data)
+    print(f"[B2] Restored {CONFIG_KEY} and {STATE_KEY}.")
 
 
 def upload() -> None:
+    if not CONFIG_FILE.exists():
+        raise RuntimeError(f"Cannot upload: configuration file is missing at {CONFIG_FILE}")
     if not STATE_FILE.exists():
-        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        STATE_FILE.write_text('{"eod_sent": []}\n', encoding="utf-8")
-    data = STATE_FILE.read_bytes()
-    validate_state(data)
+        raise RuntimeError(f"Cannot upload: state file is missing at {STATE_FILE}")
+    config_data = CONFIG_FILE.read_bytes()
+    state_data = STATE_FILE.read_bytes()
+    validate_config(config_data)
+    validate_state(state_data)
     s3 = b2_client()
-    s3.put_object(
-        Bucket=os.environ["B2_BUCKET"],
-        Key=B2_KEY,
-        Body=data,
-        ContentType="application/json",
-    )
-    print(f"[B2] Uploaded KSE state to {B2_KEY}.")
+    bucket = os.environ["B2_BUCKET"]
+    s3.put_object(Bucket=bucket, Key=CONFIG_KEY, Body=config_data, ContentType="text/yaml")
+    s3.put_object(Bucket=bucket, Key=STATE_KEY, Body=state_data, ContentType="application/json")
+    print(f"[B2] Uploaded {CONFIG_KEY} and {STATE_KEY}.")
 
 
 command = os.environ.get("B2_COMMAND", "")
@@ -90,5 +105,5 @@ try:
     else:
         raise RuntimeError("Set B2_COMMAND to download or upload")
 except Exception as error:
-    print(f"[B2] KSE state sync failed: {error}")
+    print(f"[B2] KSE sync failed: {error}")
     raise SystemExit(1)

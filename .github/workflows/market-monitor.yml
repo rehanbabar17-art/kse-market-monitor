@@ -26,6 +26,9 @@ env:
   B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
   B2_BUCKET: ${{ secrets.B2_BUCKET }}
   B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
+  B2_CONFIG_FILE: /tmp/kse-monitor-config.yaml
+  B2_STATE_FILE: /tmp/kse-monitor-last_eod.json
+  KSE_STATE_FILE: /tmp/kse-monitor-last_eod.json
 
 jobs:
   monitor:
@@ -43,7 +46,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r kse-monitor/requirements.txt
 
-      - name: Restore EOD state from B2
+      - name: Restore monitor configuration and state from B2
         env:
           B2_COMMAND: download
         run: python kse-monitor/b2_sync.py
@@ -51,26 +54,24 @@ jobs:
       - name: Determine run mode
         id: mode
         run: |
-          echo "mode=${{ inputs.mode }}" >> $GITHUB_OUTPUT
+          echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
           if [ "${{ inputs.force }}" = "true" ]; then
-            echo "force=--force" >> $GITHUB_OUTPUT
+            echo "force=--force" >> "$GITHUB_OUTPUT"
           else
-            echo "force=" >> $GITHUB_OUTPUT
+            echo "force=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run KSE Monitor
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: |
-          cd kse-monitor
-          python main.py --mode ${{ steps.mode.outputs.mode }} ${{ steps.mode.outputs.force }}
+        run: python kse-monitor/main.py --config "$B2_CONFIG_FILE" --mode "${{ steps.mode.outputs.mode }}" ${{ steps.mode.outputs.force }}
 
-      - name: Upload EOD state to B2
+      - name: Upload monitor configuration and state to B2
         if: always()
         env:
           B2_COMMAND: upload
         run: python kse-monitor/b2_sync.py
 
-      - name: Secure cleanup of local private state
+      - name: Secure cleanup of ephemeral B2 files
         if: always()
-        run: rm -f kse-monitor/state/last_eod.json
+        run: rm -f "$B2_CONFIG_FILE" "$B2_STATE_FILE"

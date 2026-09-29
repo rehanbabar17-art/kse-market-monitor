@@ -42,8 +42,10 @@ def load_config(path: str = None) -> dict:
 
 # ── state helpers ──────────────────────────────────────────────────
 def _state_path() -> str:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "state", "last_eod.json")
+    return os.environ.get(
+        "KSE_STATE_FILE",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "state", "last_eod.json"),
+    )
 
 
 def _load_state() -> dict:

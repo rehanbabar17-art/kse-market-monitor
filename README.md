@@ -48,10 +48,10 @@ No always-on virtual machine or paid server is required. The architecture operat
 ```
 
 1. **cron-job.org** sends a scheduled HTTP request every hour to GitHub's Actions API (`workflow_dispatch`).
-2. **GitHub Actions** launches an ephemeral Ubuntu runner, restores state from B2, and executes `kse-monitor/main.py --mode auto`.
+2. **GitHub Actions** launches an ephemeral Ubuntu runner, restores the complete monitor configuration and state from B2, and executes `kse-monitor/main.py --mode auto`.
 3. **`fetcher.py`** queries live PSX data with multi-source fallback redundancy.
 4. **`notifier.py`** formats the market report and pushes it instantly to your **ntfy** topic.
-5. The workflow uploads the updated EOD state to the private `kse-market-monitor/` B2 prefix; it no longer commits runtime state to Git.
+5. The workflow uploads the configuration and updated EOD state to the private `kse-market-monitor/` B2 prefix; GitHub is used only for code and workflow files.
 
 ---
 
@@ -63,15 +63,13 @@ kse-market-monitor/
 │   └── workflows/
 │       └── market-monitor.yml       # GitHub Actions workflow triggered by cron
 ├── kse-monitor/
-│   ├── config.yaml                  # Watchlist, trading hours, ntfy settings
 │   ├── main.py                      # Main entrypoint & schedule evaluation logic
 │   ├── fetcher.py                   # Multi-source scraper (PSX Portal, Futures, Investify)
 │   ├── notifier.py                  # Message builder & ntfy push dispatcher
 │   ├── requirements.txt             # Python libraries (requests, pyyaml, etc.)
 │   ├── server.py                    # Optional lightweight FastAPI/Flask local server
 │   ├── b2_sync.py                   # B2 state restore/upload helper
-│   └── state/
-│       └── last_eod.json            # Runner copy; authoritative state is stored in B2
+│   └── state/                       # Not tracked; created only in temporary runners
 ├── Dockerfile                       # Container definition for self-hosting
 └── README.md                        # Documentation & operator manual
 ```
@@ -80,10 +78,22 @@ kse-market-monitor/
 
 ## 🎯 How to Manage Your Stock Watchlist
 
-To add, edit, or remove stocks from your alerts, you only need to edit **`kse-monitor/config.yaml`**.
+The authoritative watchlist is stored in the private B2 object **`kse-market-monitor/config.yaml`**.
+The repository does not retain a configuration or state cache. Download the B2 configuration
+for an approved edit, then upload it again:
 
-### 1. Opening `config.yaml`
-Locate the `stocks:` section at the bottom of `kse-monitor/config.yaml`:
+### 1. Download the B2 configuration
+With the B2 secrets exported, run:
+
+```bash
+cd kse-market-monitor/kse-monitor
+export B2_CONFIG_FILE=/tmp/kse-monitor-config.yaml
+export B2_STATE_FILE=/tmp/kse-monitor-last_eod.json
+export KSE_STATE_FILE=/tmp/kse-monitor-last_eod.json
+B2_COMMAND=download python b2_sync.py
+```
+
+Edit `/tmp/kse-monitor-config.yaml` and locate its `stocks:` section:
 
 ```yaml
 stocks:
@@ -115,13 +125,11 @@ PSX 30-day and 90-day futures follow the `SYMBOL-MONTH` format (e.g. `MLCF-OCT`,
 The scraper automatically detects the hyphenated month pattern, queries the PSX Futures AJAX table for that specific contract month, and parses its open, high, low, current price, and volume.
 
 ### 4. Removing a Stock
-Simply delete or comment out (`#`) the symbol lines in `config.yaml`, commit the change, and push to GitHub:
+Delete or comment out (`#`) the symbol lines in `/tmp/kse-monitor-config.yaml`, then upload the updated B2 configuration:
 ```bash
-git add kse-monitor/config.yaml
-git commit -m "Update stock watchlist"
-git push origin main
+B2_COMMAND=upload python b2_sync.py
 ```
-*The next scheduled run will immediately reflect your updated watchlist.*
+The next scheduled run will immediately use the updated B2 watchlist. Do not commit the temporary configuration.
 
 ---
 
@@ -176,7 +184,7 @@ Notifications are published via [ntfy.sh](https://ntfy.sh) — a free, open-sour
 
 Pakistan Stock Exchange trading sessions run in the **`Asia/Karachi`** timezone (PKT / UTC+5).
 
-The trading schedule is configured inside `kse-monitor/config.yaml`:
+The trading schedule is configured inside the B2 object `kse-market-monitor/config.yaml`:
 ```yaml
 market:
   timezone: "Asia/Karachi"
@@ -213,8 +221,9 @@ trading_windows:
 5. Click **Add secret**.
 
 ### Step 2: Add the shared Backblaze B2 secrets
-The workflow stores only the small EOD deduplication state in the namespaced object
-`kse-market-monitor/last_eod.json` inside the shared `GithubRepoSecretRB17` bucket.
+The workflow stores the complete monitor setup in the namespaced objects
+`kse-market-monitor/config.yaml` and `kse-market-monitor/last_eod.json` inside the shared
+`GithubRepoSecretRB17` bucket.
 Add these repository secrets using **Settings → Secrets and variables → Actions**:
 
 | Secret | Value |
@@ -255,11 +264,12 @@ To allow `cron-job.org` to trigger your GitHub Actions workflow:
      ```
 5. Save the job.
 
-### B2 state lifecycle
-- Before the monitor starts, `b2_sync.py` downloads `kse-market-monitor/last_eod.json`.
-- After the monitor finishes, the workflow uploads the local state and removes the runner copy.
-- If the B2 object does not exist yet, the checked-in empty state is used for the first bootstrap upload.
-- Runtime state is never committed back to GitHub, so repeated runs do not create state-file commits.
+### B2 configuration and state lifecycle
+- Before the monitor starts, `b2_sync.py` downloads both B2 objects into `/tmp`.
+- The monitor reads the watchlist and trading schedule from the downloaded B2 configuration.
+- After the monitor finishes, the workflow uploads both configuration and EOD state back to B2.
+- The temporary files are deleted after every run; no configuration or runtime-state cache is retained in GitHub.
+- If either required B2 object is missing, the workflow fails rather than silently using stale repository data.
 
 ### Manual workflow test
 Use **Actions → KSE Market Monitor → Run workflow** and select `auto` with `force=false`.
@@ -308,14 +318,17 @@ python main.py --mode summary --force
 python main.py --mode auto
 ```
 
-The local commands above use the local `state/last_eod.json` file directly. To mirror
-GitHub Actions, run the B2 restore before `main.py` and the B2 upload afterward:
+To mirror GitHub Actions locally, run the B2 restore before `main.py` and the B2 upload afterward:
 
 ```bash
 cd kse-monitor
+export B2_CONFIG_FILE=/tmp/kse-monitor-config.yaml
+export B2_STATE_FILE=/tmp/kse-monitor-last_eod.json
+export KSE_STATE_FILE=/tmp/kse-monitor-last_eod.json
 B2_COMMAND=download python b2_sync.py
-python main.py --mode auto
+python main.py --config "$B2_CONFIG_FILE" --mode auto
 B2_COMMAND=upload python b2_sync.py
+rm -f "$B2_CONFIG_FILE" "$B2_STATE_FILE"
 ```
 
 ---
@@ -324,8 +337,8 @@ B2_COMMAND=upload python b2_sync.py
 
 If you want to customize how the application operates under the hood, here is a breakdown of what each Python module controls:
 
-### 1. `kse-monitor/config.yaml`
-- Controls stock watchlist, timezone, trading hours, and custom thresholds.
+### 1. B2 object `kse-market-monitor/config.yaml`
+- Controls the stock watchlist, timezone, trading hours, and custom thresholds.
 - Values like `ntfy.server` can be altered if you host your own private ntfy server instance.
 
 ### 2. `kse-monitor/fetcher.py`
@@ -341,7 +354,7 @@ If you want to customize how the application operates under the hood, here is a 
 
 ### 4. `kse-monitor/main.py`
 - Evaluates the current market time against `trading_windows`.
-- Checks `state/last_eod.json` to guarantee only one EOD alert is dispatched per calendar day.
+- Checks the B2-restored `last_eod.json` to guarantee only one EOD alert is dispatched per calendar day.
 
 ---
 
@@ -363,7 +376,7 @@ If you want to customize how the application operates under the hood, here is a 
 **A**: Go to your GitHub repo → **Actions** tab → Select **PSX Market Monitor** from the left sidebar → Click **Run workflow** dropdown → Select `mode: interval` and `force: true` → Click **Run workflow**.
 
 #### Q: Can I track stocks across different indices (e.g. KSE 30, KMI 30)?
-**A**: Yes! Simply add any valid PSX ticker symbol to `config.yaml`. Any stock listed on the Pakistan Stock Exchange can be tracked.
+**A**: Yes. Download `kse-market-monitor/config.yaml` from B2, add the valid PSX ticker to its `stocks` list, and upload it again. Any stock listed on the Pakistan Stock Exchange can be tracked.
 
 ---
 
