@@ -48,9 +48,10 @@ No always-on virtual machine or paid server is required. The architecture operat
 ```
 
 1. **cron-job.org** sends a scheduled HTTP request every hour to GitHub's Actions API (`workflow_dispatch`).
-2. **GitHub Actions** launches an ephemeral Ubuntu runner and executes `kse-monitor/main.py --mode auto`.
+2. **GitHub Actions** launches an ephemeral Ubuntu runner, restores state from B2, and executes `kse-monitor/main.py --mode auto`.
 3. **`fetcher.py`** queries live PSX data with multi-source fallback redundancy.
 4. **`notifier.py`** formats the market report and pushes it instantly to your **ntfy** topic.
+5. The workflow uploads the updated EOD state to the private `kse-market-monitor/` B2 prefix; it no longer commits runtime state to Git.
 
 ---
 
@@ -69,7 +70,8 @@ kse-market-monitor/
 │   ├── requirements.txt             # Python libraries (requests, pyyaml, etc.)
 │   ├── server.py                    # Optional lightweight FastAPI/Flask local server
 │   └── state/
-│       └── last_eod.json            # State persistence to prevent duplicate EOD alerts
+│       └── last_eod.json            # Runner copy; authoritative state is stored in B2
+│   ├── b2_sync.py                   # B2 state restore/upload helper
 ├── Dockerfile                       # Container definition for self-hosting
 └── README.md                        # Documentation & operator manual
 ```
@@ -195,7 +197,7 @@ trading_windows:
 
 ### Auto Mode Behavior:
 - **During a Trading Window**: Sends regular interval price alerts.
-- **At Market Close (5:00 PM PKT)**: Sends the full EOD summary and records the date in `kse-monitor/state/last_eod.json` to prevent duplicate alerts.
+- **At Market Close (5:00 PM PKT)**: Sends the full EOD summary and records the date in the private B2 object `kse-market-monitor/last_eod.json` to prevent duplicate alerts.
 - **Friday Jumma Break (1:00 PM - 2:00 PM PKT)**: Skips notifications during prayer break.
 - **Weekends & Off-Hours**: Does not send notifications unless explicitly invoked with `--force`.
 
@@ -210,7 +212,21 @@ trading_windows:
 4. Value: `your-ntfy-topic-name` (e.g., `kse-alerts-rehan-786`)
 5. Click **Add secret**.
 
-### Step 2: Create a GitHub Personal Access Token (PAT)
+### Step 2: Add the shared Backblaze B2 secrets
+The workflow stores only the small EOD deduplication state in the namespaced object
+`kse-market-monitor/last_eod.json` inside the shared `GithubRepoSecretRB17` bucket.
+Add these repository secrets using **Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+|---|---|
+| `B2_KEY_ID` | The Backblaze application key ID |
+| `B2_APPLICATION_KEY` | The Backblaze application key |
+| `B2_BUCKET` | `GithubRepoSecretRB17` |
+| `B2_ENDPOINT` | `https://s3.us-east-005.backblazeb2.com` |
+
+The application key should be restricted to the shared bucket and should not be committed to the repository.
+
+### Step 3: Create a GitHub Personal Access Token (PAT)
 To allow `cron-job.org` to trigger your GitHub Actions workflow:
 1. Go to GitHub: **Settings → Developer settings → Personal access tokens → Tokens (classic)**.
 2. Click **Generate new token (classic)**.
@@ -218,7 +234,7 @@ To allow `cron-job.org` to trigger your GitHub Actions workflow:
 4. Select Scope: Check **`workflow`**.
 5. Generate and copy your token (`ghp_...`).
 
-### Step 3: Configure Scheduled Job on cron-job.org
+### Step 4: Configure Scheduled Job on cron-job.org
 1. Create a free account on [cron-job.org](https://cron-job.org).
 2. Click **Create Cronjob**.
 3. Fill in the fields:
