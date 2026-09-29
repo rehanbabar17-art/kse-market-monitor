@@ -69,9 +69,9 @@ kse-market-monitor/
 │   ├── notifier.py                  # Message builder & ntfy push dispatcher
 │   ├── requirements.txt             # Python libraries (requests, pyyaml, etc.)
 │   ├── server.py                    # Optional lightweight FastAPI/Flask local server
+│   ├── b2_sync.py                   # B2 state restore/upload helper
 │   └── state/
 │       └── last_eod.json            # Runner copy; authoritative state is stored in B2
-│   ├── b2_sync.py                   # B2 state restore/upload helper
 ├── Dockerfile                       # Container definition for self-hosting
 └── README.md                        # Documentation & operator manual
 ```
@@ -255,6 +255,17 @@ To allow `cron-job.org` to trigger your GitHub Actions workflow:
      ```
 5. Save the job.
 
+### B2 state lifecycle
+- Before the monitor starts, `b2_sync.py` downloads `kse-market-monitor/last_eod.json`.
+- After the monitor finishes, the workflow uploads the local state and removes the runner copy.
+- If the B2 object does not exist yet, the checked-in empty state is used for the first bootstrap upload.
+- Runtime state is never committed back to GitHub, so repeated runs do not create state-file commits.
+
+### Manual workflow test
+Use **Actions → KSE Market Monitor → Run workflow** and select `auto` with `force=false`.
+The run should show successful **Restore EOD state from B2** and **Upload EOD state to B2** steps.
+To test notifications outside market hours, select `interval` or `summary` and set `force=true`.
+
 ---
 
 ## 💻 Local Development & Testing
@@ -282,6 +293,9 @@ pip install -r requirements.txt
 export NTFY_TOPIC="your-test-topic"   # On Windows use: set NTFY_TOPIC=your-test-topic
 ```
 
+For local B2 synchronization tests, also set `B2_KEY_ID`, `B2_APPLICATION_KEY`,
+`B2_BUCKET`, and `B2_ENDPOINT` in your shell. Never commit these values.
+
 ### 4. Running Test Commands
 ```bash
 # Test interval alert immediately (ignores trading hours)
@@ -292,6 +306,16 @@ python main.py --mode summary --force
 
 # Run in normal auto mode (respects market schedule)
 python main.py --mode auto
+```
+
+The local commands above use the local `state/last_eod.json` file directly. To mirror
+GitHub Actions, run the B2 restore before `main.py` and the B2 upload afterward:
+
+```bash
+cd kse-monitor
+B2_COMMAND=download python b2_sync.py
+python main.py --mode auto
+B2_COMMAND=upload python b2_sync.py
 ```
 
 ---
