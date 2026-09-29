@@ -846,8 +846,10 @@ def _mk(cfg: dict, data: dict) -> dict:
         "symbol": cfg["symbol"],
         "name": cfg["name"],
         "price": data["price"],
-        "change": data["change"],
-        "change_pct": data["change_pct"],
+        # PSX reports blank change values for symbols with no trade/change.
+        # Normalize them before notifier.py compares the value numerically.
+        "change": data.get("change") if data.get("change") is not None else 0,
+        "change_pct": data.get("change_pct") if data.get("change_pct") is not None else 0,
         "volume": data["volume"],
         "high": data["high"],
         "low": data["low"],
