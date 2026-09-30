@@ -167,6 +167,7 @@ Notifications are published via [ntfy.sh](https://ntfy.sh) — a free, open-sour
 * **Interval Alert (During Trading Hours)**:
   - Summarizes current KSE-100 status.
   - Lists each watchlist stock with current price, change in PKR, percentage change (🟢 / 🔴), and traded volume.
+  - Is sent only when the displayed market snapshot differs from the last interval alert sent that day; a changed notification timestamp alone does not trigger another alert.
 * **End of Day (EOD) Summary (Market Close)**:
   - Sent once per trading day after market close (from 5:00 PM PKT onwards).
   - Includes Day High, Day Low, Close Price, Total Volume, and Net Day Change.
@@ -227,6 +228,23 @@ trigger is still configured, disable it to avoid duplicate hourly notifications.
 - After the monitor finishes, the workflow uploads both configuration and runtime state back to B2. The state includes the last same-day interval snapshot fingerprint as well as EOD delivery markers.
 - The temporary files are deleted after every run; no configuration or runtime-state cache is retained in GitHub.
 - If either required B2 object is missing, the workflow fails rather than silently using stale repository data.
+
+The runtime state object may contain:
+
+```json
+{
+  "eod_sent": [],
+  "last_interval": {
+    "date": "2026-09-30",
+    "signature": "timestamp-free-market-snapshot-hash"
+  }
+}
+```
+
+The interval signature covers the values displayed in the KSE-100 and
+watchlist sections, but deliberately excludes the notification timestamp.
+The signature is reset by date, so the first unchanged-looking snapshot of a
+new trading day is still delivered.
 
 ### Manual workflow test
 Use **Actions → KSE Market Monitor → Run workflow** and select `auto` with `force=false`.
