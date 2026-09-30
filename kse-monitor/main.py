@@ -14,6 +14,7 @@ Modes:
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import sys
@@ -89,6 +90,47 @@ def _mark_sent(state: dict, composite_key: str):
     if composite_key not in sents:
         sents.append(composite_key)
     state["eod_sent"] = sents
+
+
+def _interval_signature(data: dict, date_str: str) -> str:
+    """Create a timestamp-free fingerprint of the interval alert contents.
+
+    The date is included so an unchanged closing snapshot on a new trading day
+    still produces that day's first update. Fields shown in interval messages
+    are included; notification timestamps are intentionally excluded.
+    """
+    kse = data.get("kse100", {})
+    kse_snapshot = {
+        key: kse.get(key)
+        for key in ("price", "change", "change_pct", "volume", "high", "low", "error")
+        if key in kse
+    }
+    stocks_snapshot = []
+    for stock in data.get("stocks", []):
+        stocks_snapshot.append({
+            key: stock.get(key)
+            for key in (
+                "symbol", "name", "price", "change", "change_pct", "error"
+            )
+            if key in stock
+        })
+    payload = {"date": date_str, "kse100": kse_snapshot, "stocks": stocks_snapshot}
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _interval_was_sent(state: dict, date_str: str, signature: str) -> bool:
+    """Return whether this exact interval snapshot was already delivered today."""
+    previous = state.get("last_interval", {})
+    return (
+        isinstance(previous, dict)
+        and previous.get("date") == date_str
+        and previous.get("signature") == signature
+    )
+
+
+def _mark_interval_sent(state: dict, date_str: str, signature: str):
+    state["last_interval"] = {"date": date_str, "signature": signature}
 
 
 def _purge_old(state: dict, today: str):
@@ -207,6 +249,16 @@ def main():
     if args.mode == "summary":
         title, body = format_eod_summary(data, timestamp, label=summary_label)
     else:
+        date_str = now.strftime("%Y-%m-%d")
+        interval_signature = _interval_signature(data, date_str)
+        state = _load_state()
+        if (
+            args.mode == "interval"
+            and not args.force
+            and _interval_was_sent(state, date_str, interval_signature)
+        ):
+            print("Skipping interval alert — market snapshot unchanged.")
+            sys.exit(0)
         title, body = format_interval_update(data, timestamp)
 
     server = "https://ntfy.sh"
@@ -222,6 +274,10 @@ def main():
     if not ok:
         print("Failed to send notification.")
         sys.exit(1)
+
+    if args.mode == "interval":
+        _mark_interval_sent(state, date_str, interval_signature)
+        _save_state(state)
 
     label = f"{summary_label} Summary" if args.mode == "summary" else "Update"
     print(f"{label} sent to ntfy://{topic}")

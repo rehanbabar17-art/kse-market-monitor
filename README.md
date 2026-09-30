@@ -183,6 +183,7 @@ and 14:00–17:00 PKT. The B2 file contains symbols only.
 
 ### Auto Mode Behavior:
 - **During a Trading Window**: Sends regular interval price alerts.
+- **Duplicate interval snapshots**: If the KSE-100 and watchlist values shown in the interval message are unchanged from the last alert sent that day, the monitor skips the duplicate notification. The notification timestamp is not part of the comparison.
 - **At Market Close (5:00 PM PKT)**: Sends the full EOD summary and records the date in the private B2 object `kse-market-monitor/last_eod.json` to prevent duplicate alerts.
 - **Friday Jumma Break (1:00 PM - 2:00 PM PKT)**: Skips notifications during prayer break.
 - **Weekends & Off-Hours**: Does not send notifications unless explicitly invoked with `--force`.
@@ -223,7 +224,7 @@ trigger is still configured, disable it to avoid duplicate hourly notifications.
 ### B2 configuration and state lifecycle
 - Before the monitor starts, `b2_sync.py` downloads both B2 objects into `/tmp`.
 - The monitor reads the symbols from the downloaded B2 configuration; names and quote details come from PSX/DPS market data when available.
-- After the monitor finishes, the workflow uploads both configuration and EOD state back to B2.
+- After the monitor finishes, the workflow uploads both configuration and runtime state back to B2. The state includes the last same-day interval snapshot fingerprint as well as EOD delivery markers.
 - The temporary files are deleted after every run; no configuration or runtime-state cache is retained in GitHub.
 - If either required B2 object is missing, the workflow fails rather than silently using stale repository data.
 
@@ -273,6 +274,10 @@ python main.py --mode summary --force
 # Run in normal auto mode (respects market schedule)
 python main.py --mode auto
 ```
+
+Use `--force` for a manual interval test when you want to send an alert even
+if the same snapshot was already sent. Scheduled `auto` runs still suppress
+identical snapshots.
 
 To mirror GitHub Actions locally, run the B2 restore before `main.py` and the B2 upload afterward:
 
