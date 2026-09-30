@@ -47,7 +47,7 @@ No always-on virtual machine or paid server is required. The architecture operat
                                                                                                      └───────────────────────┘
 ```
 
-1. **cron-job.org** sends a scheduled HTTP request every hour to GitHub's Actions API (`workflow_dispatch`).
+1. **GitHub Actions** starts the workflow every hour on weekdays using its built-in schedule. A manual `workflow_dispatch` is also available for testing.
 2. **GitHub Actions** launches an ephemeral Ubuntu runner, restores the complete monitor configuration and state from B2, and executes `kse-monitor/main.py --mode auto`.
 3. **`fetcher.py`** queries live PSX data with multi-source fallback redundancy.
 4. **`notifier.py`** formats the market report and pushes it instantly to your **ntfy** topic.
@@ -189,7 +189,7 @@ and 14:00–17:00 PKT. The B2 file contains symbols only.
 
 ---
 
-## ⚙️ Automated Setup (GitHub Actions + cron-job.org)
+## ⚙️ Automated Setup (GitHub Actions)
 
 ### Step 1: Add your ntfy Topic as a GitHub Secret
 1. Go to your repository on GitHub: **Settings → Secrets and variables → Actions**.
@@ -213,34 +213,12 @@ Add these repository secrets using **Settings → Secrets and variables → Acti
 
 The application key should be restricted to the shared bucket and should not be committed to the repository.
 
-### Step 3: Create a GitHub Personal Access Token (PAT)
-To allow `cron-job.org` to trigger your GitHub Actions workflow:
-1. Go to GitHub: **Settings → Developer settings → Personal access tokens → Tokens (classic)**.
-2. Click **Generate new token (classic)**.
-3. Note: `cron-job-kse-monitor`.
-4. Select Scope: Check **`workflow`**.
-5. Generate and copy your token (`ghp_...`).
-
-### Step 4: Configure Scheduled Job on cron-job.org
-1. Create a free account on [cron-job.org](https://cron-job.org).
-2. Click **Create Cronjob**.
-3. Fill in the fields:
-   - **Title**: `KSE Market Monitor Trigger`
-   - **URL**: `https://api.github.com/repos/rehanbabar17-art/kse-market-monitor/actions/workflows/market-monitor.yml/dispatches`
-   - **Execution schedule**: Every hour / Custom `0 * * * 1-5` (Mon–Fri).
-   - **Request Method**: `POST`
-4. **Advanced Configuration**:
-   - **Request Headers**:
-     ```text
-     Authorization: Bearer YOUR_GITHUB_PAT_TOKEN
-     Content-Type: application/json
-     Accept: application/vnd.github+json
-     ```
-   - **Request Body**:
-     ```json
-     {"ref":"main","inputs":{"mode":"auto","force":"false"}}
-     ```
-5. Save the job.
+### Step 3: Enable the GitHub Actions schedule
+The workflow includes the schedule `0 4-12 * * 1-5` in UTC, which runs hourly during
+09:00–17:00 Pakistan time, Monday–Friday.
+GitHub may pause scheduled workflows in repositories with no recent activity; opening the
+Actions page or pushing a normal commit reactivates the schedule. If an older cron-job.org
+trigger is still configured, disable it to avoid duplicate hourly notifications.
 
 ### B2 configuration and state lifecycle
 - Before the monitor starts, `b2_sync.py` downloads both B2 objects into `/tmp`.
@@ -351,7 +329,13 @@ If you want to customize how the application operates under the hood, here is a 
 **A**: Confirm that the ntfy app is subscribed to the exact topic stored in the GitHub Actions secret `NTFY_TOPIC`. In Actions, a successful `Run KSE Monitor` step means the fetch and ntfy publish request completed; a missing alert after that usually indicates a topic, subscription, or device-notification setting issue.
 
 #### Q: How do I test the GitHub Actions workflow manually?
-**A**: Go to your GitHub repo → **Actions** tab → Select **PSX Market Monitor** from the left sidebar → Click **Run workflow** dropdown → Select `mode: interval` and `force: true` → Click **Run workflow**.
+**A**: Go to your GitHub repo → **Actions** tab → Select **KSE Market Monitor** → Click **Run workflow** → select `mode: interval` and `force: true` → click **Run workflow**.
+
+#### Q: The workflow is green but no alert arrives.
+**A**: Check the `Run KSE Monitor` step. A message such as `Auto: skipping — before market hours`
+means the workflow ran outside the built-in PSX schedule. The workflow now evaluates the
+schedule in code and runs hourly on weekdays. A successful run during a trading window should
+show `Fetching market data` and a successful ntfy publish rather than an `Auto: skipping` message.
 
 #### Q: Can I track stocks across different indices (e.g. KSE 30, KMI 30)?
 **A**: Yes. Download `kse-market-monitor/config.yaml` from B2, add the valid PSX symbol to its `stocks` list, and upload it again. Any stock listed on the Pakistan Stock Exchange can be tracked.

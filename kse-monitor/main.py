@@ -108,7 +108,8 @@ def _windows_for_day(config: dict, weekday_index: int) -> list[tuple[int, int]]:
 
 def _current_window(config: dict, hour: int, weekday_index: int) -> tuple[int, int] | None:
     """Return the active trading window containing `hour`, or None."""
-    for w_open, w_close in _windows_for_day(config, weekday_index):
+    schedule = config.get("trading_windows", TRADING_WINDOWS)
+    for w_open, w_close in _windows_for_day({"trading_windows": schedule}, weekday_index):
         if w_open <= hour < w_close:
             return (w_open, w_close)
     return None
