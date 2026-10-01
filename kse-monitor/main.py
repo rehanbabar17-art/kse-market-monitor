@@ -227,8 +227,8 @@ def main():
         except StopIteration as e:
             print(f"Auto: skipping — {e}")
             sys.exit(0)
-    elif not args.force and not _is_market_hours(config):
-        print("Outside market hours. Use --force to send anyway.")
+    elif not _is_market_hours(config):
+        print("Outside market hours (09:00–17:00 PKT). Dispatch skipped.")
         sys.exit(0)
 
     print(f"Fetching market data (mode={args.mode})...")

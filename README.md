@@ -47,7 +47,7 @@ No always-on virtual machine or paid server is required. The architecture operat
                                                                                                      └───────────────────────┘
 ```
 
-1. **GitHub Actions** starts the workflow every hour on weekdays using its built-in schedule. A manual `workflow_dispatch` is also available for testing.
+1. **GitHub Actions** runs only when the `workflow_dispatch` link is called. There is no built-in GitHub schedule; an external scheduler may call the dispatch link as needed.
 2. **GitHub Actions** launches an ephemeral Ubuntu runner, restores the complete monitor configuration and state from B2, and executes `kse-monitor/main.py --mode auto`.
 3. **`fetcher.py`** queries live PSX data with multi-source fallback redundancy.
 4. **`notifier.py`** formats the market report and pushes it instantly to your **ntfy** topic.
@@ -187,7 +187,7 @@ and 14:00–17:00 PKT. The B2 file contains symbols only.
 - **Duplicate interval snapshots**: If the KSE-100 and watchlist symbols and displayed prices are unchanged from the last alert sent that day, the monitor skips the duplicate notification. The notification timestamp and derived daily fields are not part of the comparison.
 - **At/after market close**: Auto mode skips without fetching data or sending a notification. Run `python main.py --mode summary --force` only when a closing summary is wanted manually.
 - **Friday Jumma Break (1:00 PM - 2:00 PM PKT)**: Skips notifications during prayer break.
-- **Weekends & Off-Hours**: Does not send notifications unless explicitly invoked with `--force`.
+- **Weekends & Off-Hours**: Dispatch runs are skipped; the 09:00–17:00 PKT limit is enforced even when the legacy `force=true` input is supplied.
 
 ---
 
@@ -215,12 +215,12 @@ Add these repository secrets using **Settings → Secrets and variables → Acti
 
 The application key should be restricted to the shared bucket and should not be committed to the repository.
 
-### Step 3: Enable the GitHub Actions schedule
-The workflow includes the schedule `0 4-12 * * 1-5` in UTC, which runs hourly during
-09:00–17:00 Pakistan time, Monday–Friday.
-GitHub may pause scheduled workflows in repositories with no recent activity; opening the
-Actions page or pushing a normal commit reactivates the schedule. If an older cron-job.org
-trigger is still configured, disable it to avoid duplicate hourly notifications.
+### Step 3: Configure the dispatch trigger
+The workflow has no built-in GitHub schedule. Configure an external scheduler,
+such as cron-job.org, to call the `workflow_dispatch` link when desired. The
+monitor itself enforces the `Asia/Karachi` trading windows: 09:00–17:00 PKT on
+Monday–Thursday and 09:00–13:00 plus 14:00–17:00 PKT on Friday. Calls outside
+those windows finish successfully without fetching data or sending a notification.
 
 ### B2 configuration and state lifecycle
 - Before the monitor starts, `b2_sync.py` downloads both B2 objects into `/tmp`.
@@ -249,7 +249,7 @@ new trading day is still delivered.
 ### Manual workflow test
 Use **Actions → KSE Market Monitor → Run workflow** and select `auto` with `force=false`.
 The run should show successful **Restore EOD state from B2** and **Upload EOD state to B2** steps.
-To test notifications outside market hours, select `interval` or `summary` and set `force=true`.
+The `force` input is retained for compatibility but cannot bypass the market-hours limit.
 
 ---
 
