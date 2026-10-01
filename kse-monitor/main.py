@@ -254,10 +254,9 @@ def main():
         state = _load_state()
         if (
             args.mode == "interval"
-            and not args.force
             and _interval_was_sent(state, date_str, interval_signature)
         ):
-            print("Skipping interval alert — market snapshot unchanged.")
+            print("Skipping interval alert — market snapshot unchanged (force does not bypass deduplication).")
             sys.exit(0)
         title, body = format_interval_update(data, timestamp)
 

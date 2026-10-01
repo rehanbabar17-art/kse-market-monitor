@@ -293,9 +293,11 @@ python main.py --mode summary --force
 python main.py --mode auto
 ```
 
-Use `--force` for a manual interval test when you want to send an alert even
-if the same snapshot was already sent. Scheduled `auto` runs still suppress
-identical snapshots.
+The `--force` option only bypasses the market-hours check; it does not bypass
+same-day interval deduplication. This prevents external `workflow_dispatch`
+triggers that pass `force=true` from sending the same market snapshot again.
+To test a notification, wait for a market value to change or remove the
+`last_interval` entry from the restored B2 state before running the workflow.
 
 To mirror GitHub Actions locally, run the B2 restore before `main.py` and the B2 upload afterward:
 
