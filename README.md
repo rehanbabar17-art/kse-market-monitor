@@ -167,9 +167,9 @@ Notifications are published via [ntfy.sh](https://ntfy.sh) — a free, open-sour
 * **Interval Alert (During Trading Hours)**:
   - Summarizes current KSE-100 status.
   - Lists each watchlist stock with current price, change in PKR, percentage change (🟢 / 🔴), and traded volume.
-  - Is sent only when the displayed market snapshot differs from the last interval alert sent that day; a changed notification timestamp alone does not trigger another alert.
+  - Is sent only when a KSE/stock symbol or displayed price differs from the last interval alert sent that day. Changes to derived daily fields such as volume, high/low, or percentage change do not trigger another alert when prices are unchanged.
 * **End of Day (EOD) Summary (Market Close)**:
-  - Sent once per trading day after market close (from 5:00 PM PKT onwards).
+  - Available only when explicitly run with `--mode summary --force`; automatic scheduled runs do not send post-close notifications.
   - Includes Day High, Day Low, Close Price, Total Volume, and Net Day Change.
 
 ---
@@ -184,8 +184,8 @@ and 14:00–17:00 PKT. The B2 file contains symbols only.
 
 ### Auto Mode Behavior:
 - **During a Trading Window**: Sends regular interval price alerts.
-- **Duplicate interval snapshots**: If the KSE-100 and watchlist values shown in the interval message are unchanged from the last alert sent that day, the monitor skips the duplicate notification. The notification timestamp is not part of the comparison.
-- **At Market Close (5:00 PM PKT)**: Sends the full EOD summary and records the date in the private B2 object `kse-market-monitor/last_eod.json` to prevent duplicate alerts.
+- **Duplicate interval snapshots**: If the KSE-100 and watchlist symbols and displayed prices are unchanged from the last alert sent that day, the monitor skips the duplicate notification. The notification timestamp and derived daily fields are not part of the comparison.
+- **At/after market close**: Auto mode skips without fetching data or sending a notification. Run `python main.py --mode summary --force` only when a closing summary is wanted manually.
 - **Friday Jumma Break (1:00 PM - 2:00 PM PKT)**: Skips notifications during prayer break.
 - **Weekends & Off-Hours**: Does not send notifications unless explicitly invoked with `--force`.
 

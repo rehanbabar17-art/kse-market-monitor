@@ -2,7 +2,9 @@ name: KSE Market Monitor
 
 on:
   schedule:
-    - cron: "0 4-12 * * 1-5"
+    # 09:00-16:00 PKT (UTC 04:00-11:00). The app also guards market hours,
+    # but do not schedule the known post-close run at 17:00 PKT.
+    - cron: "0 4-11 * * 1-5"
   workflow_dispatch:
     inputs:
       mode:
