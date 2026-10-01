@@ -96,23 +96,24 @@ def _interval_signature(data: dict, date_str: str) -> str:
     """Create a timestamp-free fingerprint of the interval alert contents.
 
     The date is included so an unchanged closing snapshot on a new trading day
-    still produces that day's first update. Fields shown in interval messages
-    are included; notification timestamps are intentionally excluded.
+    still produces that day's first update. Only the symbol and displayed
+    price are used as meaningful quote fields; notification timestamps and
+    derived daily fields are intentionally excluded. Volume, high/low, and
+    change values can be refreshed or normalized by data sources after the
+    market closes even when displayed prices have not changed.
     """
     kse = data.get("kse100", {})
     kse_snapshot = {
-        key: kse.get(key)
-        for key in ("price", "change", "change_pct", "volume", "high", "low", "error")
-        if key in kse
+        "symbol": kse.get("symbol", "KSE100"),
+        "price": kse.get("price"),
+        "error": kse.get("error"),
     }
     stocks_snapshot = []
     for stock in data.get("stocks", []):
         stocks_snapshot.append({
-            key: stock.get(key)
-            for key in (
-                "symbol", "name", "price", "change", "change_pct", "error"
-            )
-            if key in stock
+            "symbol": stock.get("symbol"),
+            "price": stock.get("price"),
+            "error": stock.get("error"),
         })
     payload = {"date": date_str, "kse100": kse_snapshot, "stocks": stocks_snapshot}
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -190,20 +191,11 @@ def _decide_auto(config: dict) -> tuple[str, bool, str]:
         _save_state(state)
         return "interval", False, wid or ""
 
-    # ── outside all windows today — check if any window just closed ──
-    # Find the most recently closed window (latest close_hour <= now.hour)
-    closed_wins = [w for w in windows if now.hour >= w[1]]
-    if closed_wins:
-        last_closed = closed_wins[-1]
-        cw_id = _window_id(date_str, last_closed)
-        sent = _sent_on(state)
-        if cw_id not in sent:
-            _mark_sent(state, cw_id)
-            _save_state(state)
-            return "summary", False, cw_id
-        raise StopIteration("summary already sent for this window")
-
-    raise StopIteration("before market hours")
+    # Never fetch or notify outside an active window. In particular, the
+    # scheduled run at/after the close must not send an EOD snapshot whose
+    # prices are identical to the last intraday alert. A summary remains
+    # available through an explicit `--mode summary --force` invocation.
+    raise StopIteration("outside market hours")
 
 
 # ── market hours (non-auto) ───────────────────────────────────────

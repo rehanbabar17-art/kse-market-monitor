@@ -1,7 +1,16 @@
 import copy
+import datetime
 import unittest
+from unittest.mock import patch
 
-from main import _interval_signature, _interval_was_sent, _mark_interval_sent
+from main import (
+    MARKET_TIMEZONE,
+    _decide_auto,
+    _interval_signature,
+    _interval_was_sent,
+    _mark_interval_sent,
+)
+import pytz
 
 
 SAMPLE_DATA = {
@@ -46,12 +55,45 @@ class IntervalDeduplicationTests(unittest.TestCase):
             _interval_signature(changed, "2026-09-30"),
         )
 
+    def test_daily_metadata_change_does_not_trigger_alert(self):
+        changed = copy.deepcopy(SAMPLE_DATA)
+        changed["kse100"].update({
+            "change": 0,
+            "change_pct": 0,
+            "volume": 999999,
+            "high": 171500,
+            "low": 169800,
+        })
+        changed["stocks"][0].update({"name": "HTL Limited", "change": 0})
+        self.assertEqual(
+            _interval_signature(SAMPLE_DATA, "2026-09-30"),
+            _interval_signature(changed, "2026-09-30"),
+        )
+
+    def test_symbol_change_has_new_signature(self):
+        changed = copy.deepcopy(SAMPLE_DATA)
+        changed["stocks"][0]["symbol"] = "OGDC"
+        self.assertNotEqual(
+            _interval_signature(SAMPLE_DATA, "2026-09-30"),
+            _interval_signature(changed, "2026-09-30"),
+        )
+
     def test_same_snapshot_is_allowed_again_on_a_new_day(self):
         state = {}
         signature = _interval_signature(SAMPLE_DATA, "2026-09-30")
         _mark_interval_sent(state, "2026-09-30", signature)
         self.assertTrue(_interval_was_sent(state, "2026-09-30", signature))
         self.assertFalse(_interval_was_sent(state, "2026-10-01", signature))
+
+
+class AutoScheduleTests(unittest.TestCase):
+    def test_auto_skips_after_market_close(self):
+        tz = pytz.timezone(MARKET_TIMEZONE)
+        after_close = tz.localize(datetime.datetime(2026, 10, 1, 17, 1))
+        with patch("main.datetime.datetime") as datetime_class:
+            datetime_class.now.return_value = after_close
+            with self.assertRaisesRegex(StopIteration, "outside market hours"):
+                _decide_auto({})
 
 
 if __name__ == "__main__":
