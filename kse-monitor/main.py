@@ -145,7 +145,7 @@ def _purge_old(state: dict, today: str):
 def _windows_for_day(config: dict, weekday_index: int) -> list[tuple[int, int]]:
     """Return list of (open_hour, close_hour) for the given weekday."""
     key = DAY_KEYS[weekday_index]
-    windows = config.get("trading_windows", {}).get(key, [])
+    windows = (config.get("trading_windows") or TRADING_WINDOWS).get(key, [])
     return [tuple(w) for w in windows]
 
 
@@ -204,6 +204,9 @@ def _is_market_hours(config: dict) -> bool:
     now = datetime.datetime.now(tz)
     win = _current_window(config, now.hour, now.weekday())
     return win is not None
+
+
+is_market_hours = _is_market_hours
 
 
 # ── main ───────────────────────────────────────────────────────────

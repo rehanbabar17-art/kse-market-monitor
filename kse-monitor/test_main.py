@@ -96,5 +96,29 @@ class AutoScheduleTests(unittest.TestCase):
                 _decide_auto({})
 
 
+
+class NotifierFormatTests(unittest.TestCase):
+    def test_interval_update_includes_day_high_and_low_per_stock(self):
+        from notifier import format_interval_update
+
+        data = copy.deepcopy(SAMPLE_DATA)
+        data["stocks"][0].update({"high": 38.45, "low": 37.10})
+        data["stocks"][1].update({"high": 5.70, "low": 5.25})
+        _title, body = format_interval_update(data, "19 Nov 2026, 03:35 PM PKT")
+        self.assertIn("High: 38.45", body)
+        self.assertIn("Low: 37.10", body)
+        self.assertIn("High: 5.70", body)
+        self.assertIn("Low: 5.25", body)
+
+    def test_eod_summary_handles_missing_high_low_safely(self):
+        from notifier import format_eod_summary
+
+        data = copy.deepcopy(SAMPLE_DATA)
+        data["stocks"][0].update({"high": 38.45, "low": None, "volume": 5000})
+        _title, body = format_eod_summary(data, "19 Nov 2026")
+        self.assertIn("High: 38.45", body)
+        self.assertIn("Low: N/A", body)
+
+
 if __name__ == "__main__":
     unittest.main()

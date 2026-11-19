@@ -633,7 +633,8 @@ def _fetch_investify_fallback(symbol: str) -> dict | None:
             direction = quote_match.group(2).lower()
             abs_change = _num(quote_match.group(3)) or 0
             change = -abs_change if direction == "down" else abs_change
-            change_pct = _num(quote_match.group(4)) or 0
+            abs_pct = abs(_num(quote_match.group(4)) or 0)
+            change_pct = -abs_pct if direction == "down" else abs_pct
 
             range_match = re.search(
                 r"displayed session['’]s range is PKR\s*"
@@ -678,7 +679,7 @@ def _fetch_investify_fallback(symbol: str) -> dict | None:
         )
 
         for block in push_blocks:
-            unescaped = block.replace('\"', '"')
+            unescaped = block.replace('\\"', '"')
             idx = unescaped.find('"stock":{')
             if idx == -1:
                 continue
@@ -846,12 +847,12 @@ def _mk(cfg: dict | str, data: dict) -> dict:
     return {
         "symbol": symbol,
         "name": data.get("name") or data.get("company") or symbol,
-        "price": data["price"],
+        "price": data.get("price"),
         # PSX reports blank change values for symbols with no trade/change.
         # Normalize them before notifier.py compares the value numerically.
         "change": data.get("change") if data.get("change") is not None else 0,
         "change_pct": data.get("change_pct") if data.get("change_pct") is not None else 0,
-        "volume": data["volume"],
-        "high": data["high"],
-        "low": data["low"],
+        "volume": data.get("volume"),
+        "high": data.get("high"),
+        "low": data.get("low"),
     }

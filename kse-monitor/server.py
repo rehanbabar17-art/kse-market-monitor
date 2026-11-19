@@ -21,11 +21,10 @@ import pytz
 
 from fetcher import fetch_all
 from notifier import send_ntfy, format_interval_update, format_eod_summary
-from main import load_config, is_market_hours
+from main import load_config, is_market_hours, MARKET_TIMEZONE
 
 
 app = Flask(__name__)
-CONFIG = load_config()
 TOKEN = os.environ.get("MONITOR_TOKEN", "")
 
 
@@ -40,11 +39,12 @@ def _send(mode: str):
     if not _auth_ok():
         return jsonify({"status": "unauthorized"}), 401
 
-    config = CONFIG
+    config = load_config()
     print("Fetching market data...")
     data = fetch_all(stocks=config["stocks"])
 
-    tz = pytz.timezone(config["market"]["timezone"])
+    tz_name = config.get("market", {}).get("timezone", MARKET_TIMEZONE)
+    tz = pytz.timezone(tz_name)
     now = datetime.datetime.now(tz)
     timestamp = now.strftime("%d %b %Y, %I:%M %p %Z")
 
@@ -53,8 +53,9 @@ def _send(mode: str):
     else:
         title, body = format_interval_update(data, timestamp)
 
-    server = config["ntfy"]["server"]
-    topic = config["ntfy"]["topic"]
+    ntfy_cfg = config.get("ntfy", {})
+    server = ntfy_cfg.get("server") or os.environ.get("NTFY_SERVER", "https://ntfy.sh")
+    topic = ntfy_cfg.get("topic") or os.environ.get("NTFY_TOPIC", "")
 
     if not topic:
         return jsonify({"status": "error", "message": "ntfy topic not set"}), 500
